@@ -1,11 +1,14 @@
 {
-  "name": "vdigitalize",
+  "name": "@vdigitalize-cli/vdigitalize",
   "version": "1.0.0",
   "description": "A professional CLI tool for setting up full-stack projects with Laravel backend and React frontend",
   "type": "module",
   "main": "index.js",
   "bin": {
     "vdigitalize": "./index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "node index.js",
