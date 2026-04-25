@@ -1,9 +1,9 @@
 # VDigitalize CLI
 
-[![npm version](https://badge.fury.io/js/vdigitalize.svg)](https://www.npmjs.com/package/vdigitalize)
+[![npm version](https://badge.fury.io/js/@vdigitalize-cli/vdigitalize.svg)](https://www.npmjs.com/package/@vdigitalize-cli/vdigitalize)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A professional CLI tool for scaffolding full-stack projects with **Laravel backend** and **React frontend** (Vite).
+A professional CLI tool for scaffolding full-stack projects with **Laravel backend**, **React frontend** (Vite), and **GitHub Copilot integration**.
 
 ```
   ╦  ╦╔╦╗╦╔═╗╦╔╦╗╔═╗╦  ╦╔═╗╔═╗
@@ -21,11 +21,13 @@ A professional CLI tool for scaffolding full-stack projects with **Laravel backe
 - 🔄 **Automated Push Scripts** - One command to push all repositories
 - ✅ **System Health Check** - Verify all dependencies are installed
 - 🎯 **Cross-Platform** - Works on macOS, Linux, and Windows
+- 🤖 **GitHub Copilot Integration** - Auto-generated instructions and prompt logging
+- 🔗 **Custom SSH Support** - Works with any Git SSH configuration (e.g., `git@github-custom:user/repo.git`)
 
 ## Installation
 
 ```bash
-npm install -g vdigitalize
+npm install -g @vdigitalize-cli/vdigitalize
 ```
 
 ## Requirements
@@ -35,8 +37,8 @@ Before using VDigitalize, ensure you have the following installed:
 - **Node.js** >= 18.0.0
 - **npm** >= 8.0.0
 - **Git**
-- **PHP** >= 8.1
-- **Composer**
+- **PHP** >= 8.1 (optional - can skip Laravel setup)
+- **Composer** (optional - can skip Laravel setup)
 
 Run the doctor command to verify your setup:
 
@@ -55,21 +57,28 @@ vdigitalize setup
 This interactive command will guide you through:
 
 1. **Project Configuration**
-   - Project name
+   - Project name and description
    - Frontend folder name (default: `frontend`)
    - Backend folder name (default: `backend`)
 
 2. **Git Repositories**
-   - Frontend GitHub repo URL
-   - Backend GitHub repo URL
-   - Frontend/dist GitHub repo URL
+   - Frontend Git repo URL (supports custom SSH configs)
+   - Backend Git repo URL
+   - Frontend/dist Git repo URL
 
-3. **Environment URLs** (optional)
+3. **Project Features**
+   - App type selection (e-commerce, SaaS, CMS, etc.)
+   - Feature selection (auth, REST API, database, etc.)
+   - UI framework preference
+   - State management choice
+
+4. **Environment URLs** (optional)
    - Staging URLs for frontend and backend
    - Production URLs for frontend and backend
 
-4. **Push Script**
-   - Option to generate `push.sh` for automated deployments
+5. **Additional Options**
+   - Push script generation
+   - GitHub Copilot setup
 
 ### Check System Dependencies
 
@@ -105,10 +114,42 @@ my-project/
 │   ├── src/
 │   ├── dist/          # Production build (separate git repo)
 │   └── ...
+├── .github/
+│   ├── copilot-instructions.md   # GitHub Copilot configuration
+│   └── prompts/                  # Saved development prompts
 ├── README.md
 ├── .gitignore
 └── push.sh            # Automated push script (optional)
 ```
+
+## GitHub Copilot Integration
+
+VDigitalize automatically sets up GitHub Copilot configuration for your project:
+
+### `.github/copilot-instructions.md`
+
+Contains project-specific instructions for GitHub Copilot:
+- Project overview and description
+- Tech stack details
+- Code style guidelines
+- Repository structure
+- Feature list
+
+### `.github/prompts/`
+
+A dedicated folder for saving development prompts:
+- Each prompt is saved as `prompt_001.md`, `prompt_002.md`, etc.
+- Initial prompts are auto-generated based on your selected features
+- Add new prompts as you develop to maintain project context
+
+### Auto-Generated Prompts
+
+Based on your selections, VDigitalize generates starter prompts for:
+- Project initialization
+- Authentication setup (if selected)
+- REST API structure (if selected)
+- Database schema design (if selected)
+- App-type specific features (e-commerce, SaaS, CMS, etc.)
 
 ## Push Script Usage
 
