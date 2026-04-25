@@ -19,10 +19,30 @@
     "react",
     "vite",
     "fullstack",
-    "scaffolding"
+    "scaffolding",
+    "generator",
+    "boilerplate",
+    "starter",
+    "create-project"
   ],
-  "author": "VDigitalize",
+  "author": "VDigitalize <contact@vdigitalize.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vdigitalize/vdigitalize-cli.git"
+  },
+  "homepage": "https://github.com/vdigitalize/vdigitalize-cli#readme",
+  "bugs": {
+    "url": "https://github.com/vdigitalize/vdigitalize-cli/issues"
+  },
+  "files": [
+    "index.js",
+    "commands/",
+    "utils/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
