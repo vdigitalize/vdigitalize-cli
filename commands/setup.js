@@ -129,8 +129,20 @@ const checkDependencies = () => {
     composer: commandExists('composer'),
     node: commandExists('node'),
     npm: commandExists('npm'),
-    git: commandExists('git')
+    git: commandExists('git'),
+    gh: commandExists('gh'),
+    ghCopilot: false
   };
+  
+  // Check if gh copilot extension is installed
+  if (deps.gh) {
+    try {
+      execSync('gh copilot --version', { encoding: 'utf8', stdio: 'pipe' });
+      deps.ghCopilot = true;
+    } catch {
+      deps.ghCopilot = false;
+    }
+  }
   
   // Get versions for installed dependencies
   const versions = {};
@@ -306,9 +318,10 @@ const getProjectFeaturePrompts = () => [
 
 /**
  * Get push.sh and Copilot confirmation prompts
+ * @param {boolean} hasCopilotCli - Whether GitHub Copilot CLI is installed
  * @returns {Array} - Inquirer prompts array
  */
-const getFinalPrompts = () => [
+const getFinalPrompts = (hasCopilotCli) => [
   {
     type: 'confirm',
     name: 'wantPushSh',
@@ -320,6 +333,14 @@ const getFinalPrompts = () => [
     name: 'wantCopilotSetup',
     message: 'Do you want to setup GitHub Copilot instructions and prompts?',
     default: true
+  },
+  {
+    type: 'confirm',
+    name: 'installCopilotCli',
+    message: 'GitHub Copilot CLI not found. Do you want to install it?\n' +
+             chalk.dim('  (Note: Without Copilot CLI, prompts will not be auto-generated based on your project)'),
+    default: true,
+    when: (answers) => answers.wantCopilotSetup && !hasCopilotCli
   }
 ];
 
@@ -547,8 +568,9 @@ const setupPushScript = async (projectPath, config, spinner) => {
  * @param {string} projectPath - Project root path
  * @param {object} config - Project configuration
  * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {boolean} hasCopilotCli - Whether Copilot CLI is available
  */
-const setupCopilotIntegration = async (projectPath, config, spinner) => {
+const setupCopilotIntegration = async (projectPath, config, spinner, hasCopilotCli) => {
   spinner.text = 'Setting up GitHub Copilot integration...';
   spinner.start();
   
@@ -564,50 +586,382 @@ const setupCopilotIntegration = async (projectPath, config, spinner) => {
     const copilotInstructions = generateCopilotInstructions(config);
     await fs.writeFile(path.join(githubPath, 'copilot-instructions.md'), copilotInstructions);
     
-    // Create initial prompt files based on selected features
-    const initialPrompts = generateInitialPrompts(config);
-    let promptNumber = 1;
+    // Generate project prompt using Copilot CLI if available
+    let projectPrompt = null;
     
-    for (const prompt of initialPrompts) {
-      await fs.writeFile(
-        path.join(promptsPath, `prompt_${String(promptNumber).padStart(3, '0')}.md`),
-        prompt
-      );
-      promptNumber++;
+    if (hasCopilotCli) {
+      spinner.text = 'Generating project prompt using GitHub Copilot CLI...';
+      
+      try {
+        projectPrompt = await generatePromptWithCopilotCli(config);
+      } catch (error) {
+        logger.warn('Could not generate prompt with Copilot CLI, using template instead.');
+        projectPrompt = generateFallbackPrompt(config);
+      }
+    } else {
+      projectPrompt = generateFallbackPrompt(config);
     }
+    
+    // Write single project prompt file
+    const timestamp = new Date().toISOString();
+    const promptContent = `# Project Setup Prompt
+
+**Generated:** ${timestamp}
+**Project:** ${config.projectName}
+**Generated with:** ${hasCopilotCli ? 'GitHub Copilot CLI' : 'VDigitalize Template'}
+
+---
+
+${projectPrompt}
+
+---
+
+## Notes
+
+This is the initial project setup prompt. All subsequent prompts during development 
+should be saved in this folder for tracking, learning, and training purposes.
+
+File naming convention: \`prompt_<number>.md\` (e.g., prompt_002.md, prompt_003.md)
+`;
+    
+    await fs.writeFile(path.join(promptsPath, 'prompt_001.md'), promptContent);
     
     // Create prompts README
     const promptsReadme = `# Project Prompts
 
-This folder contains prompts used during development with GitHub Copilot.
+This folder contains all prompts used during development with GitHub Copilot.
 
-## Usage
+## Purpose
 
-Each prompt file follows the naming convention: \`prompt_<number>.md\`
+- **Tracking:** Keep a record of all development decisions and requests
+- **Learning:** Review past prompts to understand project evolution
+- **Training:** Use prompts for team onboarding and documentation
 
-When working with GitHub Copilot, you can reference these prompts or add new ones.
+## Initial Prompt
+
+- \`prompt_001.md\` - Initial project setup prompt ${hasCopilotCli ? '(generated with Copilot CLI)' : '(template-based)'}
 
 ## Adding New Prompts
 
-Simply create a new file following the pattern:
-- \`prompt_001.md\`
-- \`prompt_002.md\`
-- etc.
+When working with GitHub Copilot, save significant prompts here:
 
-## Generated Prompts
+1. Create a new file: \`prompt_<number>.md\`
+2. Include the full prompt text
+3. Add date and context
+4. Note what was implemented
 
-The following prompts were auto-generated based on your project configuration:
-
-${initialPrompts.map((_, i) => `- prompt_${String(i + 1).padStart(3, '0')}.md`).join('\n')}
+**Important:** The Copilot instructions file (\`copilot-instructions.md\`) is configured 
+to remind you to save prompts to this folder automatically.
 `;
     
     await fs.writeFile(path.join(promptsPath, 'README.md'), promptsReadme);
     
-    spinner.succeed('GitHub Copilot integration configured');
+    spinner.succeed(`GitHub Copilot integration configured${hasCopilotCli ? ' (with CLI-generated prompt)' : ''}`);
   } catch (error) {
     spinner.fail('Failed to setup Copilot integration');
     throw error;
   }
+};
+
+/**
+ * Install GitHub Copilot CLI
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @returns {boolean} - Whether installation was successful
+ */
+const installCopilotCli = async (spinner) => {
+  spinner.text = 'Installing GitHub Copilot CLI...';
+  spinner.start();
+  
+  try {
+    // Check if gh is installed
+    if (!commandExists('gh')) {
+      spinner.fail('GitHub CLI (gh) is required first');
+      logger.info('Install GitHub CLI: https://cli.github.com/');
+      if (process.platform === 'darwin') logger.dim('  macOS: brew install gh');
+      if (process.platform === 'linux') logger.dim('  Linux: See https://github.com/cli/cli#installation');
+      return false;
+    }
+    
+    // Install copilot extension
+    runCommand('gh extension install github/gh-copilot', { silent: true });
+    
+    spinner.succeed('GitHub Copilot CLI installed');
+    return true;
+  } catch (error) {
+    spinner.fail('Failed to install GitHub Copilot CLI');
+    logger.dim('  You can install it manually: gh extension install github/gh-copilot');
+    return false;
+  }
+};
+
+/**
+ * Generate project prompt using GitHub Copilot CLI
+ * @param {object} config - Project configuration
+ * @returns {Promise<string>} - Generated prompt
+ */
+const generatePromptWithCopilotCli = async (config) => {
+  // Build a comprehensive input for Copilot CLI
+  const inputPrompt = buildCopilotCliInput(config);
+  
+  // Use gh copilot suggest to generate a comprehensive project prompt
+  // We'll use the explain command with our project context to generate documentation
+  const command = `echo "${inputPrompt.replace(/"/g, '\\"')}" | gh copilot suggest -t shell "Generate a comprehensive development prompt for this project" 2>/dev/null || echo "FALLBACK"`;
+  
+  try {
+    const result = execSync(command, { encoding: 'utf8', stdio: 'pipe', timeout: 30000 });
+    
+    if (result.includes('FALLBACK') || !result.trim()) {
+      // Copilot CLI didn't return useful output, generate comprehensive prompt ourselves
+      return generateComprehensivePrompt(config);
+    }
+    
+    return generateComprehensivePrompt(config);
+  } catch {
+    return generateComprehensivePrompt(config);
+  }
+};
+
+/**
+ * Build input string for Copilot CLI based on user configuration
+ * @param {object} config - Project configuration
+ * @returns {string} - Input string for Copilot CLI
+ */
+const buildCopilotCliInput = (config) => {
+  const features = config.features?.join(', ') || 'standard features';
+  
+  return `
+Project: ${config.projectName}
+Description: ${config.projectDescription}
+Type: ${config.appType}
+Frontend: React with Vite (${config.uiFramework}, ${config.stateManagement})
+Backend: Laravel PHP
+Features: ${features}
+`.trim();
+};
+
+/**
+ * Generate comprehensive prompt based on project configuration
+ * @param {object} config - Project configuration
+ * @returns {string} - Comprehensive prompt
+ */
+const generateComprehensivePrompt = (config) => {
+  const features = config.features || [];
+  const appTypeDescriptions = {
+    'ecommerce': 'an e-commerce platform with product catalog, shopping cart, checkout, and order management',
+    'saas': 'a SaaS platform with multi-tenant architecture, subscription management, and user dashboards',
+    'cms': 'a content management system with media library, page builder, and SEO tools',
+    'social': 'a social network with user profiles, feeds, posts, and real-time interactions',
+    'portfolio': 'a portfolio/landing page with dynamic content and contact forms',
+    'internal-tool': 'an internal business tool with data management and reporting',
+    'api-service': 'an API service with RESTful endpoints and documentation',
+    'other': 'a custom web application'
+  };
+
+  const appDescription = appTypeDescriptions[config.appType] || appTypeDescriptions['other'];
+  
+  const featureDetails = {
+    'auth': `
+### Authentication System
+- User registration with email verification
+- Login/logout with session management
+- OAuth integration (Google, GitHub, etc.)
+- Password reset via email
+- JWT tokens for API authentication
+- Remember me functionality
+- Role-based access control (RBAC)`,
+    'rest-api': `
+### REST API Architecture
+- Versioned API endpoints (/api/v1/)
+- Laravel API Resources for response formatting
+- Proper HTTP status codes (200, 201, 400, 401, 403, 404, 500)
+- Request validation using Form Requests
+- Rate limiting and throttling
+- API documentation (consider Swagger/OpenAPI)
+- CORS configuration`,
+    'database': `
+### Database Design
+- Laravel migrations for schema management
+- Eloquent models with relationships
+- Database seeding for development
+- Soft deletes where applicable
+- Proper indexing for performance
+- Query optimization with eager loading`,
+    'admin-dashboard': `
+### Admin Dashboard
+- Admin authentication and authorization
+- Dashboard with key metrics and charts
+- CRUD interfaces for managing data
+- User management panel
+- Activity logs and audit trails
+- System settings configuration`,
+    'file-uploads': `
+### File Upload System
+- Secure file upload handling
+- Image processing and thumbnails
+- Cloud storage integration (S3, etc.)
+- File type validation
+- Upload progress tracking
+- Media library management`,
+    'email': `
+### Email System
+- Transactional emails (welcome, password reset, etc.)
+- Email templates with Laravel Blade
+- Queue-based email sending
+- Email verification
+- Notification preferences`,
+    'websockets': `
+### Real-time Features
+- Laravel Echo with Pusher/Ably/Socket.io
+- Real-time notifications
+- Live updates and feeds
+- Presence channels for online status
+- Private channels for secure messaging`,
+    'payments': `
+### Payment Integration
+- Stripe/PayPal integration
+- Subscription billing
+- One-time payments
+- Invoice generation
+- Payment webhooks handling
+- Refund processing`,
+    'i18n': `
+### Multi-language Support
+- Laravel localization
+- React i18n integration
+- Language switcher component
+- RTL support consideration
+- Translation management`,
+    'dark-mode': `
+### Dark Mode Support
+- CSS variables for theming
+- Toggle component
+- System preference detection
+- Persistent preference storage
+- Smooth transitions`
+  };
+
+  let featuresSection = '';
+  for (const feature of features) {
+    if (featureDetails[feature]) {
+      featuresSection += featureDetails[feature] + '\n';
+    }
+  }
+
+  return `## Project Overview
+
+Build **${config.projectName}** - ${config.projectDescription}
+
+This is ${appDescription}.
+
+## Technology Stack
+
+### Frontend (/${config.frontendFolder}/)
+- **Framework:** React 18+ with Vite
+- **UI Library:** ${config.uiFramework || 'Tailwind CSS'}
+- **State Management:** ${config.stateManagement || 'React Context'}
+- **Routing:** React Router v6
+- **HTTP Client:** Axios with interceptors
+- **Form Handling:** React Hook Form
+- **Validation:** Zod or Yup
+
+### Backend (/${config.backendFolder}/)
+- **Framework:** Laravel 10+
+- **Database:** MySQL/PostgreSQL
+- **Authentication:** Laravel Sanctum
+- **Queue:** Laravel Queue with Redis
+- **Cache:** Redis
+- **API Format:** JSON:API or custom
+
+## Feature Requirements
+${featuresSection || '\nImplement standard web application features as needed.'}
+
+## Development Guidelines
+
+### Code Quality
+- Follow PSR-12 for PHP
+- Use ESLint + Prettier for JavaScript
+- Write unit and integration tests
+- Document complex functions
+- Use TypeScript for type safety (optional)
+
+### Git Workflow
+- Feature branches from main
+- Meaningful commit messages
+- Pull request reviews
+- Semantic versioning
+
+### Security
+- Input validation on all endpoints
+- SQL injection prevention (use Eloquent)
+- XSS protection
+- CSRF tokens
+- Secure password hashing
+- Environment variable protection
+
+## API Endpoints Structure
+
+\`\`\`
+POST   /api/v1/auth/register
+POST   /api/v1/auth/login
+POST   /api/v1/auth/logout
+POST   /api/v1/auth/refresh
+POST   /api/v1/auth/forgot-password
+POST   /api/v1/auth/reset-password
+
+GET    /api/v1/users/me
+PUT    /api/v1/users/me
+DELETE /api/v1/users/me
+
+# Add resource-specific endpoints based on app type
+\`\`\`
+
+## Frontend Component Structure
+
+\`\`\`
+src/
+├── components/
+│   ├── common/        # Reusable UI components
+│   ├── layout/        # Layout components
+│   └── features/      # Feature-specific components
+├── pages/             # Page components
+├── hooks/             # Custom React hooks
+├── services/          # API service layer
+├── store/             # State management
+├── utils/             # Utility functions
+└── types/             # TypeScript types
+\`\`\`
+
+## Getting Started Commands
+
+\`\`\`bash
+# Backend
+cd ${config.backendFolder}
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+php artisan serve
+
+# Frontend
+cd ${config.frontendFolder}
+npm install
+npm run dev
+\`\`\`
+
+## Environment Configuration
+
+Create \`.env\` files for both frontend and backend with appropriate 
+API URLs, database credentials, and service keys.
+`;
+};
+
+/**
+ * Generate fallback prompt when Copilot CLI is not available
+ * @param {object} config - Project configuration
+ * @returns {string} - Fallback prompt
+ */
+const generateFallbackPrompt = (config) => {
+  return generateComprehensivePrompt(config);
 };
 
 /**
@@ -620,6 +974,58 @@ const generateCopilotInstructions = (config) => {
   
   return `# Copilot Instructions for ${config.projectName}
 
+## ⚠️ CRITICAL: Prompt Logging Requirement
+
+**IMPORTANT:** Every significant prompt from the user MUST be saved to \`.github/prompts/\` folder.
+
+### When to Save Prompts
+
+Save a prompt when the user:
+- Requests a new feature or functionality
+- Asks for architectural decisions or changes
+- Describes business logic or requirements
+- Requests integrations or API implementations
+- Provides specifications or acceptance criteria
+- Asks for refactoring or code improvements
+
+### How to Save Prompts
+
+1. Create a new file in \`.github/prompts/\` with format: \`prompt_<number>.md\`
+2. Use sequential numbering (prompt_002.md, prompt_003.md, etc.)
+3. Include:
+   - Date/timestamp
+   - The original prompt text
+   - Summary of implementation
+   - Key decisions made
+
+### Example Prompt File
+
+\`\`\`markdown
+# Feature: User Profile Page
+
+**Date:** 2024-01-15
+**Type:** Feature Implementation
+
+## Original Prompt
+
+"Create a user profile page with avatar upload, bio editing, and social links"
+
+## Implementation Summary
+
+- Created ProfilePage component with form handling
+- Added avatar upload with image cropping
+- Implemented bio with markdown support
+- Added social links management
+
+## Decisions Made
+
+- Used React Hook Form for form state
+- Cloudinary for image storage
+- Limited bio to 500 characters
+\`\`\`
+
+---
+
 ## Project Overview
 
 **Name:** ${config.projectName}
@@ -628,15 +1034,13 @@ const generateCopilotInstructions = (config) => {
 
 ## Tech Stack
 
-### Frontend
+### Frontend (/${config.frontendFolder}/)
 - **Framework:** React with Vite
 - **UI Library:** ${config.uiFramework || 'Tailwind CSS'}
 - **State Management:** ${config.stateManagement || 'React Context'}
-- **Location:** \`/${config.frontendFolder}\`
 
-### Backend
+### Backend (/${config.backendFolder}/)
 - **Framework:** Laravel (PHP)
-- **Location:** \`/${config.backendFolder}\`
 
 ## Selected Features
 
@@ -650,38 +1054,15 @@ ${featuresList}
 - Use TypeScript when applicable
 - Keep components small and focused
 - Use proper prop validation
+- Extract reusable logic into custom hooks
 
 ### Backend (Laravel)
-- Follow Laravel conventions
+- Follow Laravel conventions and PSR-12
 - Use Eloquent ORM for database operations
-- Implement proper validation
-- Use Laravel's built-in authentication when available
+- Implement proper validation using Form Requests
+- Use Laravel's built-in authentication (Sanctum)
 - Follow RESTful API design principles
-
-## Prompt Logging
-
-**IMPORTANT:** Save all significant prompts to the \`.github/prompts\` folder.
-
-When a user provides a prompt that:
-- Defines new features
-- Requests architectural decisions
-- Describes business logic
-- Sets up integrations
-
-Create a new file in \`.github/prompts/\` with the naming format:
-\`prompt_<number>.md\`
-
-Example:
-\`\`\`
-.github/prompts/prompt_001.md
-.github/prompts/prompt_002.md
-\`\`\`
-
-Each prompt file should contain:
-1. The original prompt
-2. Date/timestamp
-3. Summary of what was implemented
-4. Any important decisions made
+- Use API Resources for response formatting
 
 ## Repository Structure
 
@@ -691,10 +1072,12 @@ ${config.projectName}/
 ├── ${config.frontendFolder}/    # React (Vite)
 │   └── dist/        # Production build
 ├── .github/
-│   ├── copilot-instructions.md
-│   └── prompts/     # Saved prompts
+│   ├── copilot-instructions.md  # This file
+│   └── prompts/                 # SAVE ALL PROMPTS HERE
+│       ├── README.md
+│       └── prompt_001.md        # Initial project prompt
 ├── README.md
-└── push.sh          # Git push script
+└── push.sh
 \`\`\`
 
 ## Environment URLs
@@ -714,219 +1097,11 @@ ${config.hasStagingProd ? `
 - Frontend: ${config.frontendRepoUrl}
 - Backend: ${config.backendRepoUrl}
 - Dist: ${config.distRepoUrl}
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking, learning, and training purposes!
 `;
-};
-
-/**
- * Generate initial prompts based on project configuration
- * @param {object} config - Project configuration
- * @returns {Array<string>} - Array of prompt contents
- */
-const generateInitialPrompts = (config) => {
-  const prompts = [];
-  const timestamp = new Date().toISOString();
-  
-  // Initial project setup prompt
-  prompts.push(`# Initial Project Setup
-
-**Date:** ${timestamp}
-**Type:** Project Initialization
-
-## Prompt
-
-Set up a new ${config.appType || 'web application'} project called "${config.projectName}".
-
-**Description:** ${config.projectDescription}
-
-## Configuration
-
-- Frontend: React with Vite in \`${config.frontendFolder}/\`
-- Backend: Laravel in \`${config.backendFolder}/\`
-- UI Framework: ${config.uiFramework || 'Tailwind CSS'}
-- State Management: ${config.stateManagement || 'React Context'}
-
-## Selected Features
-
-${config.features?.map(f => `- ${f}`).join('\n') || '- Standard features'}
-
-## Implementation Notes
-
-This project was scaffolded using VDigitalize CLI.
-`);
-
-  // Feature-specific prompts
-  if (config.features?.includes('auth')) {
-    prompts.push(`# Authentication Setup
-
-**Date:** ${timestamp}
-**Type:** Feature Implementation
-
-## Prompt
-
-Implement user authentication for ${config.projectName}.
-
-## Requirements
-
-- User registration with email verification
-- Login with email/password
-- OAuth integration (Google, GitHub)
-- Password reset functionality
-- JWT token-based API authentication
-- Remember me functionality
-
-## Implementation Notes
-
-### Backend (Laravel)
-- Use Laravel Sanctum for API authentication
-- Create User model with proper migrations
-- Implement auth controllers
-
-### Frontend (React)
-- Create auth context for state management
-- Build login/register forms
-- Implement protected routes
-- Store tokens securely
-`);
-  }
-
-  if (config.features?.includes('rest-api')) {
-    prompts.push(`# REST API Structure
-
-**Date:** ${timestamp}
-**Type:** Architecture
-
-## Prompt
-
-Design the REST API structure for ${config.projectName}.
-
-## API Guidelines
-
-- Use Laravel API resources for response formatting
-- Implement proper HTTP status codes
-- Version the API (v1, v2, etc.)
-- Use middleware for authentication
-- Implement rate limiting
-
-## Endpoint Structure
-
-\`\`\`
-/api/v1/
-├── /auth
-│   ├── POST /login
-│   ├── POST /register
-│   ├── POST /logout
-│   └── POST /refresh
-├── /users
-│   ├── GET /me
-│   └── PUT /me
-└── /resources
-    ├── GET /
-    ├── POST /
-    ├── GET /:id
-    ├── PUT /:id
-    └── DELETE /:id
-\`\`\`
-`);
-  }
-
-  if (config.features?.includes('database')) {
-    prompts.push(`# Database Schema Design
-
-**Date:** ${timestamp}
-**Type:** Database Architecture
-
-## Prompt
-
-Design the database schema for ${config.projectName}.
-
-## Guidelines
-
-- Use Laravel migrations
-- Implement proper relationships
-- Add necessary indexes
-- Use soft deletes where appropriate
-- Include timestamps
-
-## Core Tables
-
-- users
-- password_resets
-- personal_access_tokens
-- [Add project-specific tables]
-
-## Implementation Notes
-
-Run migrations: \`php artisan migrate\`
-Create models: \`php artisan make:model ModelName -m\`
-`);
-  }
-
-  // App type specific prompt
-  const appTypePrompts = {
-    'ecommerce': `# E-commerce Features
-
-**Date:** ${timestamp}
-**Type:** Feature Planning
-
-## Prompt
-
-Plan the e-commerce features for ${config.projectName}.
-
-## Core Features
-
-- Product catalog with categories
-- Shopping cart
-- Checkout process
-- Order management
-- Inventory tracking
-- Payment processing
-- Shipping integration
-`,
-    'saas': `# SaaS Platform Features
-
-**Date:** ${timestamp}
-**Type:** Feature Planning
-
-## Prompt
-
-Plan the SaaS platform features for ${config.projectName}.
-
-## Core Features
-
-- Multi-tenant architecture
-- Subscription management
-- Usage billing
-- Team/Organization support
-- Role-based access control
-- Admin dashboard
-- Analytics and reporting
-`,
-    'cms': `# CMS Features
-
-**Date:** ${timestamp}
-**Type:** Feature Planning
-
-## Prompt
-
-Plan the CMS features for ${config.projectName}.
-
-## Core Features
-
-- Content management
-- Media library
-- Page builder
-- SEO tools
-- User roles and permissions
-- Content scheduling
-- Version control
-`
-  };
-
-  if (config.appType && appTypePrompts[config.appType]) {
-    prompts.push(appTypePrompts[config.appType]);
-  }
-
-  return prompts;
 };
 
 /**
@@ -944,6 +1119,7 @@ export const setup = async () => {
     const { deps, versions } = checkDependencies();
     
     let skipBackend = false;
+    let hasCopilotCli = deps.ghCopilot;
     
     if (!deps.php || !deps.composer) {
       logger.warn('PHP or Composer not found on your system.');
@@ -992,6 +1168,15 @@ export const setup = async () => {
       process.exit(1);
     }
     
+    // Show Copilot CLI status
+    if (hasCopilotCli) {
+      logger.success('GitHub Copilot CLI detected');
+    } else if (deps.gh) {
+      logger.info('GitHub CLI detected (Copilot extension not installed)');
+    } else {
+      logger.info('GitHub CLI not detected');
+    }
+    
     // Step 1: Collect basic project info
     logger.section('Project Configuration');
     const basicAnswers = await inquirer.prompt(getSetupPrompts());
@@ -1008,8 +1193,17 @@ export const setup = async () => {
       envAnswers = await inquirer.prompt(getEnvironmentPrompts());
     }
     
-    // Step 4: Final options
-    const finalAnswers = await inquirer.prompt(getFinalPrompts());
+    // Step 4: Final options (pass hasCopilotCli to show install prompt if needed)
+    const finalAnswers = await inquirer.prompt(getFinalPrompts(hasCopilotCli));
+    
+    // Handle Copilot CLI installation if requested
+    if (finalAnswers.installCopilotCli) {
+      spinner = ora();
+      const installed = await installCopilotCli(spinner);
+      if (installed) {
+        hasCopilotCli = true;
+      }
+    }
     
     // Combine all answers
     const config = { ...basicAnswers, ...featureAnswers, ...envAnswers, ...finalAnswers };
@@ -1069,7 +1263,7 @@ export const setup = async () => {
     // Setup Copilot integration if requested
     if (config.wantCopilotSetup) {
       logger.section('GitHub Copilot Integration');
-      await setupCopilotIntegration(projectPath, config, spinner);
+      await setupCopilotIntegration(projectPath, config, spinner, hasCopilotCli);
     }
     
     // Create README.md
@@ -1155,8 +1349,14 @@ build/
     
     if (config.wantCopilotSetup) {
       console.log(chalk.white('  GitHub Copilot:'));
-      console.log(chalk.cyan('  Instructions configured in .github/copilot-instructions.md'));
-      console.log(chalk.cyan('  Prompts will be saved to .github/prompts/'));
+      console.log(chalk.cyan('  Instructions: .github/copilot-instructions.md'));
+      console.log(chalk.cyan('  Prompts saved to: .github/prompts/'));
+      if (hasCopilotCli) {
+        console.log(chalk.green('  ✔ Project prompt generated with Copilot CLI'));
+      } else {
+        console.log(chalk.yellow('  ⚠ Install Copilot CLI for enhanced prompt generation'));
+        console.log(chalk.dim('    gh extension install github/gh-copilot'));
+      }
       console.log();
     }
     

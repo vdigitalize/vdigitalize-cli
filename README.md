@@ -21,8 +21,9 @@ A professional CLI tool for scaffolding full-stack projects with **Laravel backe
 - 🔄 **Automated Push Scripts** - One command to push all repositories
 - ✅ **System Health Check** - Verify all dependencies are installed
 - 🎯 **Cross-Platform** - Works on macOS, Linux, and Windows
-- 🤖 **GitHub Copilot Integration** - Auto-generated instructions and prompt logging
+- 🤖 **GitHub Copilot Integration** - Auto-generated instructions and dynamic prompt generation
 - 🔗 **Custom SSH Support** - Works with any Git SSH configuration (e.g., `git@github-custom:user/repo.git`)
+- 📝 **Copilot CLI Integration** - Generate comprehensive project prompts using GitHub Copilot CLI
 
 ## Installation
 
@@ -32,13 +33,16 @@ npm install -g @vdigitalize-cli/vdigitalize
 
 ## Requirements
 
-Before using VDigitalize, ensure you have the following installed:
-
+### Required
 - **Node.js** >= 18.0.0
 - **npm** >= 8.0.0
 - **Git**
-- **PHP** >= 8.1 (optional - can skip Laravel setup)
-- **Composer** (optional - can skip Laravel setup)
+
+### Optional (but recommended)
+- **PHP** >= 8.1 (for Laravel backend setup)
+- **Composer** (for Laravel backend setup)
+- **GitHub CLI** (for enhanced features)
+- **Copilot CLI** (`gh extension install github/gh-copilot`) - for dynamic prompt generation
 
 Run the doctor command to verify your setup:
 
@@ -133,23 +137,35 @@ Contains project-specific instructions for GitHub Copilot:
 - Tech stack details
 - Code style guidelines
 - Repository structure
-- Feature list
+- **Prompt logging requirements** - instructions to save all prompts for tracking
 
 ### `.github/prompts/`
 
 A dedicated folder for saving development prompts:
-- Each prompt is saved as `prompt_001.md`, `prompt_002.md`, etc.
-- Initial prompts are auto-generated based on your selected features
-- Add new prompts as you develop to maintain project context
+- **prompt_001.md** - Initial comprehensive project prompt
+- Additional prompts saved during development (prompt_002.md, etc.)
+- Used for tracking, learning, and documentation purposes
 
-### Auto-Generated Prompts
+### Dynamic Prompt Generation with Copilot CLI
 
-Based on your selections, VDigitalize generates starter prompts for:
-- Project initialization
-- Authentication setup (if selected)
-- REST API structure (if selected)
-- Database schema design (if selected)
-- App-type specific features (e-commerce, SaaS, CMS, etc.)
+If you have GitHub Copilot CLI installed (`gh copilot`), VDigitalize generates a **comprehensive, dynamic project prompt** based on:
+- Your project name and description
+- Selected app type (e-commerce, SaaS, CMS, etc.)
+- Chosen features (auth, REST API, database, etc.)
+- UI framework and state management preferences
+
+**Without Copilot CLI:** A template-based prompt is generated with full project details.
+
+**To install Copilot CLI:**
+```bash
+gh extension install github/gh-copilot
+```
+
+### Why Save Prompts?
+
+- **Tracking:** Keep a record of all development decisions
+- **Learning:** Review past prompts to understand project evolution
+- **Training:** Use prompts for team onboarding and documentation
 
 ## Push Script Usage
 

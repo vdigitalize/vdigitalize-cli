@@ -62,6 +62,29 @@ const dependencies = [
       linux: 'sudo apt install php',
       win32: 'Download from https://www.php.net/'
     }
+  },
+  {
+    name: 'GitHub CLI',
+    command: 'gh --version',
+    installUrl: 'https://cli.github.com/',
+    installCommand: {
+      darwin: 'brew install gh',
+      linux: 'See https://github.com/cli/cli#installation',
+      win32: 'Download from https://cli.github.com/'
+    },
+    optional: true
+  },
+  {
+    name: 'Copilot CLI',
+    command: 'gh copilot --version',
+    installUrl: 'https://docs.github.com/en/copilot/github-copilot-in-the-cli',
+    installCommand: {
+      darwin: 'gh extension install github/gh-copilot',
+      linux: 'gh extension install github/gh-copilot',
+      win32: 'gh extension install github/gh-copilot'
+    },
+    optional: true,
+    requiresGh: true
   }
 ];
 
@@ -112,26 +135,42 @@ export const doctor = async () => {
 
   const spinner = ora('Checking system dependencies...').start();
   const results = [];
-  let hasErrors = false;
+  let hasRequiredErrors = false;
+  
+  // Check if gh is installed first (needed for Copilot CLI check)
+  const ghInstalled = getVersion('gh --version') !== null;
 
   // Check each dependency
   for (const dep of dependencies) {
+    // Skip Copilot CLI check if gh is not installed
+    if (dep.requiresGh && !ghInstalled) {
+      results.push({
+        ...dep,
+        version: null,
+        installed: false,
+        skipped: true
+      });
+      continue;
+    }
+    
     const version = getVersion(dep.command);
     results.push({
       ...dep,
       version,
       installed: version !== null
     });
-    if (!version) hasErrors = true;
+    if (!version && !dep.optional) hasRequiredErrors = true;
   }
 
   spinner.stop();
 
   // Display results
-  logger.section('Dependencies Status');
+  logger.section('Required Dependencies');
   console.log();
 
   for (const result of results) {
+    if (result.optional) continue;
+    
     if (result.installed) {
       console.log(
         chalk.green('  ✔'),
@@ -149,10 +188,41 @@ export const doctor = async () => {
     }
   }
 
+  // Show optional dependencies
+  logger.section('Optional Dependencies');
   console.log();
 
-  // If there are missing dependencies, show install instructions
-  if (hasErrors) {
+  for (const result of results) {
+    if (!result.optional) continue;
+    
+    if (result.installed) {
+      console.log(
+        chalk.green('  ✔'),
+        chalk.white(result.name.padEnd(12)),
+        chalk.gray('│'),
+        chalk.cyan(result.version)
+      );
+    } else if (result.skipped) {
+      console.log(
+        chalk.gray('  ○'),
+        chalk.gray(result.name.padEnd(12)),
+        chalk.gray('│'),
+        chalk.gray('Requires GitHub CLI')
+      );
+    } else {
+      console.log(
+        chalk.yellow('  ○'),
+        chalk.white(result.name.padEnd(12)),
+        chalk.gray('│'),
+        chalk.yellow('Not installed (optional)')
+      );
+    }
+  }
+
+  console.log();
+
+  // If there are missing required dependencies, show install instructions
+  if (hasRequiredErrors) {
     const platform = process.platform;
     const platformName = getPlatformName();
 
@@ -160,7 +230,7 @@ export const doctor = async () => {
     console.log();
 
     for (const result of results) {
-      if (!result.installed) {
+      if (!result.installed && !result.optional) {
         console.log(chalk.yellow(`  ${result.name}:`));
         console.log(chalk.gray(`    Command: ${result.installCommand[platform] || result.installCommand.linux}`));
         console.log(chalk.gray(`    Website: ${result.installUrl}`));
@@ -168,12 +238,28 @@ export const doctor = async () => {
       }
     }
 
-    logger.error('Some dependencies are missing. Please install them to continue.');
+    logger.error('Some required dependencies are missing. Please install them to continue.');
     logger.newLine();
     return false;
   }
 
-  logger.success('All dependencies are installed and working!');
+  // Show optional installation tips
+  const missingOptional = results.filter(r => r.optional && !r.installed && !r.skipped);
+  if (missingOptional.length > 0) {
+    logger.section('Optional Installations');
+    console.log();
+    console.log(chalk.dim('  These are optional but enhance the vdigitalize experience:'));
+    console.log();
+    
+    const platform = process.platform;
+    for (const result of missingOptional) {
+      console.log(chalk.yellow(`  ${result.name}:`));
+      console.log(chalk.gray(`    ${result.installCommand[platform] || result.installCommand.linux}`));
+    }
+    console.log();
+  }
+
+  logger.success('All required dependencies are installed!');
   logger.newLine();
 
   // Show system info

@@ -10,7 +10,7 @@
  *   vdigitalize doctor  - Check system dependencies
  * 
  * @author VDigitalize
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 import { Command } from 'commander';
@@ -25,7 +25,7 @@ const program = new Command();
 // Program metadata
 program
   .name('vdigitalize')
-  .version('1.1.0', '-v, --version', 'Output the current version')
+  .version('1.2.0', '-v, --version', 'Output the current version')
   .description(
     chalk.cyan('VDigitalize CLI') + 
     chalk.gray(' - Full-stack project scaffolding tool\n\n') +
