@@ -131,7 +131,10 @@ const checkDependencies = () => {
     npm: commandExists('npm'),
     git: commandExists('git'),
     gh: commandExists('gh'),
-    ghCopilot: false
+    ghCopilot: false,
+    wpCli: commandExists('wp'),
+    drush: commandExists('drush'),
+    mysql: commandExists('mysql')
   };
   
   // Check if gh copilot extension is installed
@@ -158,29 +161,66 @@ const checkDependencies = () => {
       versions.composer = output.match(/(\d+\.\d+(\.\d+)?)/)?.[1] || 'unknown';
     } catch { versions.composer = 'unknown'; }
   }
+  if (deps.wpCli) {
+    try {
+      const output = execSync('wp --version', { encoding: 'utf8', stdio: 'pipe' });
+      versions.wpCli = output.match(/(\d+\.\d+(\.\d+)?)/)?.[1] || 'unknown';
+    } catch { versions.wpCli = 'unknown'; }
+  }
+  if (deps.drush) {
+    try {
+      const output = execSync('drush --version', { encoding: 'utf8', stdio: 'pipe' });
+      versions.drush = output.match(/(\d+\.\d+(\.\d+)?)/)?.[1] || 'unknown';
+    } catch { versions.drush = 'unknown'; }
+  }
   
   return { deps, versions };
 };
 
 /**
- * Get the prompts for the setup flow
+ * Get initial project type selection
  * @returns {Array} - Inquirer prompts array
  */
-const getSetupPrompts = () => [
+const getProjectTypePrompts = () => [
   {
-    type: 'input',
-    name: 'projectName',
-    message: 'What is your project name?',
-    validate: validateFolderName,
-    transformer: (input) => chalk.cyan(input)
-  },
-  {
-    type: 'input',
-    name: 'projectDescription',
-    message: 'Project description:',
-    default: 'A full-stack web application',
-    validate: (input) => input.length > 0 || 'Description is required'
-  },
+    type: 'list',
+    name: 'projectType',
+    message: 'What type of project do you want to create?',
+    choices: [
+      { 
+        name: 'Full-Stack (Laravel + React/Vite)', 
+        value: 'fullstack',
+        description: 'Modern full-stack with separate frontend and backend'
+      },
+      { 
+        name: 'WordPress', 
+        value: 'wordpress',
+        description: 'WordPress CMS with theme/plugin development'
+      },
+      { 
+        name: 'PrestaShop', 
+        value: 'prestashop',
+        description: 'PrestaShop e-commerce platform'
+      },
+      { 
+        name: 'Drupal', 
+        value: 'drupal',
+        description: 'Drupal CMS for enterprise websites'
+      },
+      { 
+        name: 'Custom CMS/PHP', 
+        value: 'custom-php',
+        description: 'Custom PHP project with your own structure'
+      }
+    ]
+  }
+];
+
+/**
+ * Get the prompts for full-stack setup flow
+ * @returns {Array} - Inquirer prompts array
+ */
+const getFullStackPrompts = () => [
   {
     type: 'input',
     name: 'frontendFolder',
@@ -212,12 +252,258 @@ const getSetupPrompts = () => [
     name: 'distRepoUrl',
     message: 'Frontend/dist Git repository URL:',
     validate: validateGitUrl
+  }
+];
+
+/**
+ * Get basic project info prompts (shared across all project types)
+ * @returns {Array} - Inquirer prompts array
+ */
+const getBasicProjectPrompts = () => [
+  {
+    type: 'input',
+    name: 'projectName',
+    message: 'What is your project name?',
+    validate: validateFolderName,
+    transformer: (input) => chalk.cyan(input)
+  },
+  {
+    type: 'input',
+    name: 'projectDescription',
+    message: 'Project description:',
+    default: 'A web application',
+    validate: (input) => input.length > 0 || 'Description is required'
+  },
+  {
+    type: 'input',
+    name: 'repoUrl',
+    message: 'Git repository URL:',
+    validate: validateGitUrl
   },
   {
     type: 'confirm',
     name: 'hasStagingProd',
     message: 'Do you have staging and production environments?',
     default: false
+  }
+];
+
+/**
+ * Get WordPress-specific prompts
+ * @returns {Array} - Inquirer prompts array
+ */
+const getWordPressPrompts = () => [
+  {
+    type: 'list',
+    name: 'wpSetupType',
+    message: 'What type of WordPress setup?',
+    choices: [
+      { name: 'Fresh WordPress installation', value: 'fresh' },
+      { name: 'Theme development (Starter theme)', value: 'theme' },
+      { name: 'Plugin development', value: 'plugin' },
+      { name: 'Full WordPress + Custom theme', value: 'full-theme' }
+    ]
+  },
+  {
+    type: 'input',
+    name: 'themeName',
+    message: 'Theme name:',
+    default: (answers) => answers.projectName || 'my-theme',
+    when: (answers) => ['theme', 'full-theme'].includes(answers.wpSetupType)
+  },
+  {
+    type: 'input',
+    name: 'pluginName',
+    message: 'Plugin name:',
+    default: (answers) => answers.projectName || 'my-plugin',
+    when: (answers) => answers.wpSetupType === 'plugin'
+  },
+  {
+    type: 'list',
+    name: 'wpStarterTheme',
+    message: 'Which starter theme?',
+    choices: [
+      { name: 'Underscores (_s) - Classic starter', value: 'underscores' },
+      { name: 'Sage (Roots) - Modern with Laravel Blade', value: 'sage' },
+      { name: 'Flavor starter (Tailwind + Alpine)', value: 'flavor' },
+      { name: 'Blank theme (minimal)', value: 'blank' }
+    ],
+    when: (answers) => ['theme', 'full-theme'].includes(answers.wpSetupType)
+  },
+  {
+    type: 'confirm',
+    name: 'wpMultisite',
+    message: 'Enable WordPress Multisite?',
+    default: false,
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.wpSetupType)
+  },
+  {
+    type: 'checkbox',
+    name: 'wpPlugins',
+    message: 'Install recommended plugins?',
+    choices: [
+      { name: 'Advanced Custom Fields (ACF)', value: 'acf', checked: true },
+      { name: 'Yoast SEO', value: 'yoast' },
+      { name: 'WooCommerce', value: 'woocommerce' },
+      { name: 'Contact Form 7', value: 'cf7' },
+      { name: 'Wordfence Security', value: 'wordfence' },
+      { name: 'WP Super Cache', value: 'wp-super-cache' },
+      { name: 'Query Monitor (dev)', value: 'query-monitor' }
+    ],
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.wpSetupType)
+  }
+];
+
+/**
+ * Get PrestaShop-specific prompts
+ * @returns {Array} - Inquirer prompts array
+ */
+const getPrestaShopPrompts = () => [
+  {
+    type: 'list',
+    name: 'psSetupType',
+    message: 'What type of PrestaShop setup?',
+    choices: [
+      { name: 'Fresh PrestaShop installation', value: 'fresh' },
+      { name: 'Theme development', value: 'theme' },
+      { name: 'Module development', value: 'module' },
+      { name: 'Full PrestaShop + Custom theme', value: 'full-theme' }
+    ]
+  },
+  {
+    type: 'input',
+    name: 'psVersion',
+    message: 'PrestaShop version:',
+    default: '8.1',
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.psSetupType)
+  },
+  {
+    type: 'input',
+    name: 'themeName',
+    message: 'Theme name:',
+    default: (answers) => answers.projectName || 'my-theme',
+    when: (answers) => ['theme', 'full-theme'].includes(answers.psSetupType)
+  },
+  {
+    type: 'input',
+    name: 'moduleName',
+    message: 'Module name:',
+    default: (answers) => answers.projectName || 'mymodule',
+    when: (answers) => answers.psSetupType === 'module'
+  },
+  {
+    type: 'checkbox',
+    name: 'psModules',
+    message: 'Install recommended modules?',
+    choices: [
+      { name: 'ps_facetedsearch (Layered navigation)', value: 'ps_facetedsearch', checked: true },
+      { name: 'ps_emailsubscription (Newsletter)', value: 'ps_emailsubscription' },
+      { name: 'ps_socialfollow (Social links)', value: 'ps_socialfollow' },
+      { name: 'ps_googleanalytics', value: 'ps_googleanalytics' }
+    ],
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.psSetupType)
+  }
+];
+
+/**
+ * Get Drupal-specific prompts
+ * @returns {Array} - Inquirer prompts array
+ */
+const getDrupalPrompts = () => [
+  {
+    type: 'list',
+    name: 'drupalSetupType',
+    message: 'What type of Drupal setup?',
+    choices: [
+      { name: 'Fresh Drupal installation', value: 'fresh' },
+      { name: 'Theme development', value: 'theme' },
+      { name: 'Module development', value: 'module' },
+      { name: 'Full Drupal + Custom theme', value: 'full-theme' }
+    ]
+  },
+  {
+    type: 'list',
+    name: 'drupalProfile',
+    message: 'Installation profile:',
+    choices: [
+      { name: 'Standard (recommended)', value: 'standard' },
+      { name: 'Minimal', value: 'minimal' },
+      { name: 'Demo (Umami food magazine)', value: 'demo_umami' }
+    ],
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.drupalSetupType)
+  },
+  {
+    type: 'input',
+    name: 'themeName',
+    message: 'Theme name:',
+    default: (answers) => answers.projectName || 'my_theme',
+    when: (answers) => ['theme', 'full-theme'].includes(answers.drupalSetupType)
+  },
+  {
+    type: 'input',
+    name: 'moduleName',
+    message: 'Module name:',
+    default: (answers) => answers.projectName || 'my_module',
+    when: (answers) => answers.drupalSetupType === 'module'
+  },
+  {
+    type: 'list',
+    name: 'drupalBaseTheme',
+    message: 'Base theme:',
+    choices: [
+      { name: 'Olivero (default)', value: 'olivero' },
+      { name: 'Claro (admin)', value: 'claro' },
+      { name: 'Bootstrap 5', value: 'bootstrap5' },
+      { name: 'FLAVOR', value: 'flavor' },
+      { name: 'Custom (no base)', value: 'none' }
+    ],
+    when: (answers) => ['theme', 'full-theme'].includes(answers.drupalSetupType)
+  },
+  {
+    type: 'checkbox',
+    name: 'drupalModules',
+    message: 'Install recommended modules?',
+    choices: [
+      { name: 'Admin Toolbar', value: 'admin_toolbar', checked: true },
+      { name: 'Pathauto (URL aliases)', value: 'pathauto', checked: true },
+      { name: 'Metatag (SEO)', value: 'metatag' },
+      { name: 'Webform', value: 'webform' },
+      { name: 'Paragraphs (content blocks)', value: 'paragraphs' },
+      { name: 'Views UI', value: 'views_ui', checked: true },
+      { name: 'Devel (development)', value: 'devel' }
+    ],
+    when: (answers) => ['fresh', 'full-theme'].includes(answers.drupalSetupType)
+  }
+];
+
+/**
+ * Get Custom PHP project prompts
+ * @returns {Array} - Inquirer prompts array
+ */
+const getCustomPhpPrompts = () => [
+  {
+    type: 'list',
+    name: 'phpFramework',
+    message: 'PHP framework/structure:',
+    choices: [
+      { name: 'Plain PHP (no framework)', value: 'plain' },
+      { name: 'Slim Framework', value: 'slim' },
+      { name: 'Symfony', value: 'symfony' },
+      { name: 'CodeIgniter', value: 'codeigniter' },
+      { name: 'CakePHP', value: 'cakephp' }
+    ]
+  },
+  {
+    type: 'confirm',
+    name: 'useComposer',
+    message: 'Use Composer for dependencies?',
+    default: true
+  },
+  {
+    type: 'confirm',
+    name: 'includeFrontend',
+    message: 'Include frontend build tools (Vite/Webpack)?',
+    default: true
   }
 ];
 
@@ -471,6 +757,949 @@ const createViteProject = async (projectPath, frontendFolder, spinner) => {
     return frontendPath;
   } catch (error) {
     spinner.fail('Failed to create Vite project');
+    throw error;
+  }
+};
+
+/**
+ * Create WordPress project
+ * @param {string} projectPath - Base project path
+ * @param {object} config - Project configuration
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {object} deps - Dependencies status
+ */
+const createWordPressProject = async (projectPath, config, spinner, deps) => {
+  spinner.text = 'Setting up WordPress project...';
+  spinner.start();
+  
+  try {
+    const wpSetupType = config.wpSetupType || 'fresh';
+    
+    if (['fresh', 'full-theme'].includes(wpSetupType)) {
+      // Download WordPress using WP-CLI or Composer
+      if (deps.wpCli) {
+        spinner.text = 'Downloading WordPress using WP-CLI...';
+        runCommand('wp core download', { cwd: projectPath });
+        spinner.succeed('WordPress downloaded via WP-CLI');
+      } else if (deps.composer) {
+        spinner.text = 'Installing WordPress using Composer...';
+        runCommand('composer create-project johnpbloch/wordpress .', { cwd: projectPath });
+        spinner.succeed('WordPress installed via Composer');
+      } else {
+        // Create folder structure and instructions
+        await fs.ensureDir(path.join(projectPath, 'wp-content', 'themes'));
+        await fs.ensureDir(path.join(projectPath, 'wp-content', 'plugins'));
+        
+        await fs.writeFile(path.join(projectPath, 'SETUP.md'), `# WordPress Setup
+
+## Manual Installation Required
+
+WP-CLI and Composer not detected. Please install WordPress manually:
+
+1. Download WordPress from https://wordpress.org/download/
+2. Extract to this directory
+3. Configure wp-config.php
+4. Run the WordPress installation wizard
+
+## Recommended Tools
+
+- WP-CLI: https://wp-cli.org/
+  Install: curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+
+- Composer: https://getcomposer.org/
+`);
+        spinner.succeed('WordPress folder structure created (install WordPress manually)');
+      }
+      
+      // Install plugins if WP-CLI is available
+      if (deps.wpCli && config.wpPlugins && config.wpPlugins.length > 0) {
+        spinner.text = 'Installing WordPress plugins...';
+        spinner.start();
+        
+        for (const plugin of config.wpPlugins) {
+          try {
+            const pluginSlug = getWpPluginSlug(plugin);
+            runCommand(`wp plugin install ${pluginSlug}`, { cwd: projectPath, silent: true });
+          } catch {
+            logger.warn(`Could not install plugin: ${plugin}`);
+          }
+        }
+        spinner.succeed('WordPress plugins installed');
+      }
+    }
+    
+    // Theme setup
+    if (['theme', 'full-theme'].includes(wpSetupType)) {
+      const themesPath = path.join(projectPath, 'wp-content', 'themes');
+      await fs.ensureDir(themesPath);
+      
+      const themeName = config.themeName || config.projectName;
+      const themePath = path.join(themesPath, themeName);
+      
+      spinner.text = `Creating theme: ${themeName}...`;
+      spinner.start();
+      
+      await createWordPressTheme(themePath, themeName, config.wpStarterTheme, config);
+      spinner.succeed(`Theme "${themeName}" created`);
+    }
+    
+    // Plugin setup
+    if (wpSetupType === 'plugin') {
+      const pluginsPath = path.join(projectPath, 'wp-content', 'plugins');
+      await fs.ensureDir(pluginsPath);
+      
+      const pluginName = config.pluginName || config.projectName;
+      const pluginPath = path.join(pluginsPath, pluginName);
+      
+      spinner.text = `Creating plugin: ${pluginName}...`;
+      spinner.start();
+      
+      await createWordPressPlugin(pluginPath, pluginName, config);
+      spinner.succeed(`Plugin "${pluginName}" created`);
+    }
+    
+    return projectPath;
+  } catch (error) {
+    spinner.fail('Failed to setup WordPress project');
+    throw error;
+  }
+};
+
+/**
+ * Get WordPress plugin slug from internal name
+ */
+const getWpPluginSlug = (plugin) => {
+  const pluginMap = {
+    'acf': 'advanced-custom-fields',
+    'yoast': 'wordpress-seo',
+    'woocommerce': 'woocommerce',
+    'cf7': 'contact-form-7',
+    'wordfence': 'wordfence',
+    'wp-super-cache': 'wp-super-cache',
+    'query-monitor': 'query-monitor'
+  };
+  return pluginMap[plugin] || plugin;
+};
+
+/**
+ * Create WordPress theme structure
+ */
+const createWordPressTheme = async (themePath, themeName, starterTheme, config) => {
+  await fs.ensureDir(themePath);
+  await fs.ensureDir(path.join(themePath, 'assets'));
+  await fs.ensureDir(path.join(themePath, 'assets', 'css'));
+  await fs.ensureDir(path.join(themePath, 'assets', 'js'));
+  await fs.ensureDir(path.join(themePath, 'assets', 'images'));
+  await fs.ensureDir(path.join(themePath, 'template-parts'));
+  await fs.ensureDir(path.join(themePath, 'inc'));
+  
+  // style.css (required)
+  const styleContent = `/*
+Theme Name: ${themeName}
+Theme URI: 
+Author: ${config.projectName}
+Author URI: 
+Description: ${config.projectDescription || 'Custom WordPress theme'}
+Version: 1.0.0
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: ${themeName.toLowerCase().replace(/\s+/g, '-')}
+*/
+`;
+  await fs.writeFile(path.join(themePath, 'style.css'), styleContent);
+  
+  // functions.php
+  const functionsContent = `<?php
+/**
+ * ${themeName} functions and definitions
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+define('THEME_VERSION', '1.0.0');
+define('THEME_DIR', get_template_directory());
+define('THEME_URI', get_template_directory_uri());
+
+/**
+ * Enqueue scripts and styles
+ */
+function ${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_scripts() {
+    wp_enqueue_style('${themeName}-style', get_stylesheet_uri(), array(), THEME_VERSION);
+    wp_enqueue_style('${themeName}-main', THEME_URI . '/assets/css/main.css', array(), THEME_VERSION);
+    wp_enqueue_script('${themeName}-main', THEME_URI . '/assets/js/main.js', array('jquery'), THEME_VERSION, true);
+}
+add_action('wp_enqueue_scripts', '${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_scripts');
+
+/**
+ * Theme setup
+ */
+function ${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_setup() {
+    add_theme_support('title-tag');
+    add_theme_support('post-thumbnails');
+    add_theme_support('html5', array('search-form', 'comment-form', 'comment-list', 'gallery', 'caption'));
+    add_theme_support('custom-logo');
+    
+    register_nav_menus(array(
+        'primary' => __('Primary Menu', '${themeName}'),
+        'footer'  => __('Footer Menu', '${themeName}'),
+    ));
+}
+add_action('after_setup_theme', '${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_setup');
+
+/**
+ * Register widget areas
+ */
+function ${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_widgets_init() {
+    register_sidebar(array(
+        'name'          => __('Sidebar', '${themeName}'),
+        'id'            => 'sidebar-1',
+        'description'   => __('Add widgets here.', '${themeName}'),
+        'before_widget' => '<section id="%1$s" class="widget %2$s">',
+        'after_widget'  => '</section>',
+        'before_title'  => '<h2 class="widget-title">',
+        'after_title'   => '</h2>',
+    ));
+}
+add_action('widgets_init', '${themeName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_widgets_init');
+`;
+  await fs.writeFile(path.join(themePath, 'functions.php'), functionsContent);
+  
+  // index.php
+  const indexContent = `<?php get_header(); ?>
+
+<main id="main" class="site-main">
+    <?php
+    if (have_posts()) :
+        while (have_posts()) :
+            the_post();
+            get_template_part('template-parts/content', get_post_type());
+        endwhile;
+        
+        the_posts_pagination();
+    else :
+        get_template_part('template-parts/content', 'none');
+    endif;
+    ?>
+</main>
+
+<?php get_sidebar(); ?>
+<?php get_footer(); ?>
+`;
+  await fs.writeFile(path.join(themePath, 'index.php'), indexContent);
+  
+  // header.php
+  const headerContent = `<!DOCTYPE html>
+<html <?php language_attributes(); ?>>
+<head>
+    <meta charset="<?php bloginfo('charset'); ?>">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?php wp_head(); ?>
+</head>
+
+<body <?php body_class(); ?>>
+<?php wp_body_open(); ?>
+
+<header id="masthead" class="site-header">
+    <div class="site-branding">
+        <?php the_custom_logo(); ?>
+        <h1 class="site-title"><a href="<?php echo esc_url(home_url('/')); ?>"><?php bloginfo('name'); ?></a></h1>
+    </div>
+
+    <nav id="site-navigation" class="main-navigation">
+        <?php
+        wp_nav_menu(array(
+            'theme_location' => 'primary',
+            'menu_id'        => 'primary-menu',
+        ));
+        ?>
+    </nav>
+</header>
+`;
+  await fs.writeFile(path.join(themePath, 'header.php'), headerContent);
+  
+  // footer.php
+  const footerContent = `<footer id="colophon" class="site-footer">
+    <div class="site-info">
+        &copy; <?php echo date('Y'); ?> <?php bloginfo('name'); ?>
+    </div>
+</footer>
+
+<?php wp_footer(); ?>
+</body>
+</html>
+`;
+  await fs.writeFile(path.join(themePath, 'footer.php'), footerContent);
+  
+  // sidebar.php
+  const sidebarContent = `<?php if (is_active_sidebar('sidebar-1')) : ?>
+<aside id="secondary" class="widget-area">
+    <?php dynamic_sidebar('sidebar-1'); ?>
+</aside>
+<?php endif; ?>
+`;
+  await fs.writeFile(path.join(themePath, 'sidebar.php'), sidebarContent);
+  
+  // template-parts/content.php
+  const contentPartContent = `<article id="post-<?php the_ID(); ?>" <?php post_class(); ?>>
+    <header class="entry-header">
+        <?php the_title('<h2 class="entry-title"><a href="' . esc_url(get_permalink()) . '">', '</a></h2>'); ?>
+    </header>
+
+    <div class="entry-content">
+        <?php the_excerpt(); ?>
+    </div>
+
+    <footer class="entry-footer">
+        <?php echo get_the_date(); ?>
+    </footer>
+</article>
+`;
+  await fs.writeFile(path.join(themePath, 'template-parts', 'content.php'), contentPartContent);
+  
+  // Basic CSS
+  await fs.writeFile(path.join(themePath, 'assets', 'css', 'main.css'), '/* Add your styles here */\n');
+  
+  // Basic JS
+  await fs.writeFile(path.join(themePath, 'assets', 'js', 'main.js'), '// Add your JavaScript here\n');
+};
+
+/**
+ * Create WordPress plugin structure
+ */
+const createWordPressPlugin = async (pluginPath, pluginName, config) => {
+  await fs.ensureDir(pluginPath);
+  await fs.ensureDir(path.join(pluginPath, 'includes'));
+  await fs.ensureDir(path.join(pluginPath, 'admin'));
+  await fs.ensureDir(path.join(pluginPath, 'public'));
+  await fs.ensureDir(path.join(pluginPath, 'assets'));
+  
+  const pluginSlug = pluginName.toLowerCase().replace(/\s+/g, '-');
+  const pluginClass = pluginName.replace(/[^a-zA-Z0-9]/g, '_');
+  
+  // Main plugin file
+  const mainPluginContent = `<?php
+/**
+ * Plugin Name: ${pluginName}
+ * Plugin URI: 
+ * Description: ${config.projectDescription || 'A custom WordPress plugin'}
+ * Version: 1.0.0
+ * Author: 
+ * Author URI: 
+ * License: GPL-2.0+
+ * License URI: http://www.gnu.org/licenses/gpl-2.0.txt
+ * Text Domain: ${pluginSlug}
+ * Domain Path: /languages
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+define('${pluginClass.toUpperCase()}_VERSION', '1.0.0');
+define('${pluginClass.toUpperCase()}_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('${pluginClass.toUpperCase()}_PLUGIN_URL', plugin_dir_url(__FILE__));
+
+/**
+ * Plugin activation
+ */
+function ${pluginClass.toLowerCase()}_activate() {
+    // Activation code here
+}
+register_activation_hook(__FILE__, '${pluginClass.toLowerCase()}_activate');
+
+/**
+ * Plugin deactivation
+ */
+function ${pluginClass.toLowerCase()}_deactivate() {
+    // Deactivation code here
+}
+register_deactivation_hook(__FILE__, '${pluginClass.toLowerCase()}_deactivate');
+
+/**
+ * Load plugin files
+ */
+require_once ${pluginClass.toUpperCase()}_PLUGIN_DIR . 'includes/class-${pluginSlug}.php';
+
+/**
+ * Initialize plugin
+ */
+function ${pluginClass.toLowerCase()}_init() {
+    // Initialize plugin
+}
+add_action('plugins_loaded', '${pluginClass.toLowerCase()}_init');
+`;
+  await fs.writeFile(path.join(pluginPath, `${pluginSlug}.php`), mainPluginContent);
+  
+  // Main class file
+  const classContent = `<?php
+/**
+ * Main plugin class
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class ${pluginClass} {
+    
+    private static $instance = null;
+    
+    public static function get_instance() {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    private function __construct() {
+        $this->init_hooks();
+    }
+    
+    private function init_hooks() {
+        add_action('init', array($this, 'init'));
+        add_action('admin_init', array($this, 'admin_init'));
+    }
+    
+    public function init() {
+        // Frontend initialization
+    }
+    
+    public function admin_init() {
+        // Admin initialization
+    }
+}
+
+// Initialize
+${pluginClass}::get_instance();
+`;
+  await fs.writeFile(path.join(pluginPath, 'includes', `class-${pluginSlug}.php`), classContent);
+};
+
+/**
+ * Create PrestaShop project
+ * @param {string} projectPath - Base project path
+ * @param {object} config - Project configuration
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {object} deps - Dependencies status
+ */
+const createPrestaShopProject = async (projectPath, config, spinner, deps) => {
+  spinner.text = 'Setting up PrestaShop project...';
+  spinner.start();
+  
+  try {
+    const psSetupType = config.psSetupType || 'fresh';
+    const psVersion = config.psVersion || '8.1';
+    
+    if (['fresh', 'full-theme'].includes(psSetupType) && deps.composer) {
+      spinner.text = `Installing PrestaShop ${psVersion}...`;
+      runCommand(`composer create-project prestashop/prestashop:${psVersion} .`, { cwd: projectPath });
+      spinner.succeed(`PrestaShop ${psVersion} installed`);
+    } else if (['fresh', 'full-theme'].includes(psSetupType)) {
+      // Create basic structure
+      await fs.ensureDir(path.join(projectPath, 'themes'));
+      await fs.ensureDir(path.join(projectPath, 'modules'));
+      await fs.writeFile(path.join(projectPath, 'SETUP.md'), `# PrestaShop Setup
+
+## Manual Installation Required
+
+Download PrestaShop from https://www.prestashop.com/en/download
+Or use Composer: composer create-project prestashop/prestashop:${psVersion} .
+`);
+      spinner.succeed('PrestaShop folder structure created (install PrestaShop manually)');
+    }
+    
+    // Theme setup
+    if (['theme', 'full-theme'].includes(psSetupType)) {
+      const themesPath = path.join(projectPath, 'themes');
+      await fs.ensureDir(themesPath);
+      
+      const themeName = config.themeName || config.projectName;
+      const themePath = path.join(themesPath, themeName);
+      
+      spinner.text = `Creating PrestaShop theme: ${themeName}...`;
+      spinner.start();
+      
+      await createPrestaShopTheme(themePath, themeName, config);
+      spinner.succeed(`PrestaShop theme "${themeName}" created`);
+    }
+    
+    // Module setup
+    if (psSetupType === 'module') {
+      const modulesPath = path.join(projectPath, 'modules');
+      await fs.ensureDir(modulesPath);
+      
+      const moduleName = config.moduleName || config.projectName;
+      const modulePath = path.join(modulesPath, moduleName.toLowerCase());
+      
+      spinner.text = `Creating PrestaShop module: ${moduleName}...`;
+      spinner.start();
+      
+      await createPrestaShopModule(modulePath, moduleName, config);
+      spinner.succeed(`PrestaShop module "${moduleName}" created`);
+    }
+    
+    return projectPath;
+  } catch (error) {
+    spinner.fail('Failed to setup PrestaShop project');
+    throw error;
+  }
+};
+
+/**
+ * Create PrestaShop theme structure
+ */
+const createPrestaShopTheme = async (themePath, themeName, config) => {
+  await fs.ensureDir(themePath);
+  await fs.ensureDir(path.join(themePath, 'assets', 'css'));
+  await fs.ensureDir(path.join(themePath, 'assets', 'js'));
+  await fs.ensureDir(path.join(themePath, 'assets', 'img'));
+  await fs.ensureDir(path.join(themePath, 'templates'));
+  await fs.ensureDir(path.join(themePath, 'templates', '_partials'));
+  await fs.ensureDir(path.join(themePath, 'modules'));
+  
+  // theme.yml
+  const themeYml = `name: ${themeName}
+display_name: ${themeName}
+version: 1.0.0
+author:
+  name: "Developer"
+  email: ""
+  url: ""
+
+meta:
+  compatibility:
+    from: 8.0.0
+    to: ~
+  available_layouts:
+    layout-full-width:
+      name: Full Width
+      description: Full width layout
+    layout-left-column:
+      name: Left Column
+      description: Left sidebar layout
+    layout-right-column:
+      name: Right Column
+      description: Right sidebar layout
+
+global_settings:
+  configuration:
+    PS_IMAGE_QUALITY: png
+  modules:
+    to_enable: []
+    to_disable: []
+    to_hook: []
+`;
+  await fs.writeFile(path.join(themePath, 'config', 'theme.yml'), themeYml);
+  
+  // index.tpl
+  const indexTpl = `{extends file='page.tpl'}
+
+{block name='page_content'}
+  {foreach from=$products item="product"}
+    {include file='catalog/_partials/miniatures/product.tpl' product=$product}
+  {/foreach}
+{/block}
+`;
+  await fs.ensureDir(path.join(themePath, 'templates'));
+  await fs.writeFile(path.join(themePath, 'templates', 'index.tpl'), indexTpl);
+  
+  // preview.png placeholder
+  await fs.writeFile(path.join(themePath, 'preview.png'), '');
+};
+
+/**
+ * Create PrestaShop module structure
+ */
+const createPrestaShopModule = async (modulePath, moduleName, config) => {
+  await fs.ensureDir(modulePath);
+  await fs.ensureDir(path.join(modulePath, 'views', 'templates', 'admin'));
+  await fs.ensureDir(path.join(modulePath, 'views', 'templates', 'front'));
+  await fs.ensureDir(path.join(modulePath, 'views', 'css'));
+  await fs.ensureDir(path.join(modulePath, 'views', 'js'));
+  await fs.ensureDir(path.join(modulePath, 'controllers', 'admin'));
+  await fs.ensureDir(path.join(modulePath, 'controllers', 'front'));
+  
+  const moduleClass = moduleName.charAt(0).toUpperCase() + moduleName.slice(1).toLowerCase();
+  
+  // Main module file
+  const mainModuleContent = `<?php
+/**
+ * ${moduleName}
+ *
+ * @author    Developer
+ * @copyright 2024
+ * @license   
+ */
+
+if (!defined('_PS_VERSION_')) {
+    exit;
+}
+
+class ${moduleClass} extends Module
+{
+    public function __construct()
+    {
+        $this->name = '${moduleName.toLowerCase()}';
+        $this->tab = 'other';
+        $this->version = '1.0.0';
+        $this->author = 'Developer';
+        $this->need_instance = 0;
+        $this->ps_versions_compliancy = [
+            'min' => '8.0.0',
+            'max' => _PS_VERSION_,
+        ];
+        $this->bootstrap = true;
+
+        parent::__construct();
+
+        $this->displayName = $this->l('${moduleName}');
+        $this->description = $this->l('${config.projectDescription || 'Custom PrestaShop module'}');
+        $this->confirmUninstall = $this->l('Are you sure you want to uninstall?');
+    }
+
+    public function install()
+    {
+        return parent::install()
+            && $this->registerHook('displayHeader')
+            && $this->registerHook('displayFooter');
+    }
+
+    public function uninstall()
+    {
+        return parent::uninstall();
+    }
+
+    public function hookDisplayHeader($params)
+    {
+        // Hook code here
+    }
+
+    public function hookDisplayFooter($params)
+    {
+        // Hook code here
+    }
+}
+`;
+  await fs.writeFile(path.join(modulePath, `${moduleName.toLowerCase()}.php`), mainModuleContent);
+};
+
+/**
+ * Create Drupal project
+ * @param {string} projectPath - Base project path
+ * @param {object} config - Project configuration
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {object} deps - Dependencies status
+ */
+const createDrupalProject = async (projectPath, config, spinner, deps) => {
+  spinner.text = 'Setting up Drupal project...';
+  spinner.start();
+  
+  try {
+    const drupalSetupType = config.drupalSetupType || 'fresh';
+    const drupalProfile = config.drupalProfile || 'standard';
+    
+    if (['fresh', 'full-theme'].includes(drupalSetupType) && deps.composer) {
+      spinner.text = 'Installing Drupal via Composer...';
+      runCommand('composer create-project drupal/recommended-project .', { cwd: projectPath });
+      spinner.succeed('Drupal installed via Composer');
+      
+      // Install modules if drush is available
+      if (deps.drush && config.drupalModules && config.drupalModules.length > 0) {
+        spinner.text = 'Installing Drupal modules...';
+        spinner.start();
+        
+        for (const module of config.drupalModules) {
+          try {
+            runCommand(`composer require drupal/${module}`, { cwd: projectPath, silent: true });
+          } catch {
+            logger.warn(`Could not install module: ${module}`);
+          }
+        }
+        spinner.succeed('Drupal modules installed');
+      }
+    } else if (['fresh', 'full-theme'].includes(drupalSetupType)) {
+      await fs.ensureDir(path.join(projectPath, 'web', 'themes', 'custom'));
+      await fs.ensureDir(path.join(projectPath, 'web', 'modules', 'custom'));
+      await fs.writeFile(path.join(projectPath, 'SETUP.md'), `# Drupal Setup
+
+## Installation
+
+Use Composer: composer create-project drupal/recommended-project .
+Or download from https://www.drupal.org/download
+`);
+      spinner.succeed('Drupal folder structure created (install Drupal manually)');
+    }
+    
+    // Theme setup
+    if (['theme', 'full-theme'].includes(drupalSetupType)) {
+      const themesPath = (['fresh', 'full-theme'].includes(drupalSetupType) && deps.composer)
+        ? path.join(projectPath, 'web', 'themes', 'custom')
+        : path.join(projectPath, 'themes', 'custom');
+      await fs.ensureDir(themesPath);
+      
+      const themeName = config.themeName || config.projectName;
+      const themePath = path.join(themesPath, themeName.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+      
+      spinner.text = `Creating Drupal theme: ${themeName}...`;
+      spinner.start();
+      
+      await createDrupalTheme(themePath, themeName, config);
+      spinner.succeed(`Drupal theme "${themeName}" created`);
+    }
+    
+    // Module setup
+    if (drupalSetupType === 'module') {
+      const modulesPath = path.join(projectPath, 'web', 'modules', 'custom');
+      await fs.ensureDir(modulesPath);
+      
+      const moduleName = config.moduleName || config.projectName;
+      const modulePath = path.join(modulesPath, moduleName.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+      
+      spinner.text = `Creating Drupal module: ${moduleName}...`;
+      spinner.start();
+      
+      await createDrupalModule(modulePath, moduleName, config);
+      spinner.succeed(`Drupal module "${moduleName}" created`);
+    }
+    
+    return projectPath;
+  } catch (error) {
+    spinner.fail('Failed to setup Drupal project');
+    throw error;
+  }
+};
+
+/**
+ * Create Drupal theme structure
+ */
+const createDrupalTheme = async (themePath, themeName, config) => {
+  const themeSlug = themeName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  
+  await fs.ensureDir(themePath);
+  await fs.ensureDir(path.join(themePath, 'css'));
+  await fs.ensureDir(path.join(themePath, 'js'));
+  await fs.ensureDir(path.join(themePath, 'images'));
+  await fs.ensureDir(path.join(themePath, 'templates'));
+  
+  // theme.info.yml
+  const infoYml = `name: '${themeName}'
+type: theme
+description: '${config.projectDescription || 'Custom Drupal theme'}'
+core_version_requirement: ^10 || ^11
+base theme: ${config.drupalBaseTheme === 'none' ? 'false' : (config.drupalBaseTheme || 'olivero')}
+
+libraries:
+  - ${themeSlug}/global
+
+regions:
+  header: Header
+  primary_menu: Primary menu
+  secondary_menu: Secondary menu
+  page_top: Page top
+  page_bottom: Page bottom
+  highlighted: Highlighted
+  breadcrumb: Breadcrumb
+  content: Content
+  sidebar_first: Sidebar first
+  sidebar_second: Sidebar second
+  footer: Footer
+`;
+  await fs.writeFile(path.join(themePath, `${themeSlug}.info.yml`), infoYml);
+  
+  // theme.libraries.yml
+  const librariesYml = `global:
+  version: 1.0
+  css:
+    theme:
+      css/style.css: {}
+  js:
+    js/script.js: {}
+`;
+  await fs.writeFile(path.join(themePath, `${themeSlug}.libraries.yml`), librariesYml);
+  
+  // Basic CSS
+  await fs.writeFile(path.join(themePath, 'css', 'style.css'), '/* Add your styles here */\n');
+  
+  // Basic JS
+  await fs.writeFile(path.join(themePath, 'js', 'script.js'), '// Add your JavaScript here\n');
+};
+
+/**
+ * Create Drupal module structure
+ */
+const createDrupalModule = async (modulePath, moduleName, config) => {
+  const moduleSlug = moduleName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  
+  await fs.ensureDir(modulePath);
+  await fs.ensureDir(path.join(modulePath, 'src'));
+  await fs.ensureDir(path.join(modulePath, 'src', 'Controller'));
+  await fs.ensureDir(path.join(modulePath, 'src', 'Form'));
+  await fs.ensureDir(path.join(modulePath, 'templates'));
+  
+  // module.info.yml
+  const infoYml = `name: '${moduleName}'
+type: module
+description: '${config.projectDescription || 'Custom Drupal module'}'
+core_version_requirement: ^10 || ^11
+package: Custom
+`;
+  await fs.writeFile(path.join(modulePath, `${moduleSlug}.info.yml`), infoYml);
+  
+  // module.module
+  const moduleContent = `<?php
+
+/**
+ * @file
+ * Primary module hooks for ${moduleName} module.
+ */
+
+/**
+ * Implements hook_theme().
+ */
+function ${moduleSlug}_theme() {
+  return [
+    '${moduleSlug}' => [
+      'render element' => 'children',
+    ],
+  ];
+}
+`;
+  await fs.writeFile(path.join(modulePath, `${moduleSlug}.module`), moduleContent);
+  
+  // routing.yml
+  const routingYml = `${moduleSlug}.page:
+  path: '/${moduleSlug}'
+  defaults:
+    _controller: '\\Drupal\\${moduleSlug}\\Controller\\${moduleName.replace(/[^a-zA-Z0-9]/g, '')}Controller::content'
+    _title: '${moduleName}'
+  requirements:
+    _permission: 'access content'
+`;
+  await fs.writeFile(path.join(modulePath, `${moduleSlug}.routing.yml`), routingYml);
+  
+  // Controller
+  const controllerContent = `<?php
+
+namespace Drupal\\${moduleSlug}\\Controller;
+
+use Drupal\\Core\\Controller\\ControllerBase;
+
+/**
+ * Returns responses for ${moduleName} routes.
+ */
+class ${moduleName.replace(/[^a-zA-Z0-9]/g, '')}Controller extends ControllerBase {
+
+  /**
+   * Builds the response.
+   */
+  public function content() {
+    return [
+      '#markup' => $this->t('Hello, World!'),
+    ];
+  }
+
+}
+`;
+  await fs.writeFile(
+    path.join(modulePath, 'src', 'Controller', `${moduleName.replace(/[^a-zA-Z0-9]/g, '')}Controller.php`),
+    controllerContent
+  );
+};
+
+/**
+ * Create Custom PHP project
+ * @param {string} projectPath - Base project path
+ * @param {object} config - Project configuration
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {object} deps - Dependencies status
+ */
+const createCustomPhpProject = async (projectPath, config, spinner, deps) => {
+  spinner.text = 'Setting up PHP project...';
+  spinner.start();
+  
+  try {
+    const framework = config.phpFramework || 'plain';
+    
+    if (framework === 'slim' && deps.composer) {
+      runCommand('composer require slim/slim slim/psr7', { cwd: projectPath });
+    } else if (framework === 'symfony' && deps.composer) {
+      runCommand('composer create-project symfony/skeleton .', { cwd: projectPath });
+    } else if (framework === 'codeigniter' && deps.composer) {
+      runCommand('composer create-project codeigniter4/appstarter .', { cwd: projectPath });
+    } else if (framework === 'cakephp' && deps.composer) {
+      runCommand('composer create-project cakephp/app .', { cwd: projectPath });
+    } else {
+      // Plain PHP structure
+      await fs.ensureDir(path.join(projectPath, 'public'));
+      await fs.ensureDir(path.join(projectPath, 'src'));
+      await fs.ensureDir(path.join(projectPath, 'config'));
+      await fs.ensureDir(path.join(projectPath, 'views'));
+      await fs.ensureDir(path.join(projectPath, 'assets', 'css'));
+      await fs.ensureDir(path.join(projectPath, 'assets', 'js'));
+      
+      // index.php
+      const indexContent = `<?php
+/**
+ * ${config.projectName}
+ * ${config.projectDescription || ''}
+ */
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+// Your application code here
+echo "Hello, World!";
+`;
+      await fs.writeFile(path.join(projectPath, 'public', 'index.php'), indexContent);
+      
+      // composer.json
+      if (config.useComposer && deps.composer) {
+        const composerJson = {
+          name: config.projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+          description: config.projectDescription || '',
+          type: 'project',
+          autoload: {
+            'psr-4': {
+              'App\\': 'src/'
+            }
+          },
+          require: {
+            php: '>=8.1'
+          }
+        };
+        await fs.writeFile(path.join(projectPath, 'composer.json'), JSON.stringify(composerJson, null, 2));
+        runCommand('composer install', { cwd: projectPath });
+      }
+    }
+    
+    spinner.succeed(`PHP project created (${framework})`);
+    
+    // Add frontend tools if requested
+    if (config.includeFrontend) {
+      spinner.text = 'Setting up frontend tools...';
+      spinner.start();
+      
+      const packageJson = {
+        name: config.projectName.toLowerCase(),
+        version: '1.0.0',
+        scripts: {
+          dev: 'vite',
+          build: 'vite build'
+        },
+        devDependencies: {
+          vite: '^5.0.0'
+        }
+      };
+      await fs.writeFile(path.join(projectPath, 'package.json'), JSON.stringify(packageJson, null, 2));
+      runCommand('npm install', { cwd: projectPath });
+      
+      spinner.succeed('Frontend tools configured');
+    }
+    
+    return projectPath;
+  } catch (error) {
+    spinner.fail('Failed to setup PHP project');
     throw error;
   }
 };
@@ -1105,6 +2334,385 @@ ${config.hasStagingProd ? `
 };
 
 /**
+ * Handle CMS-specific setup flows (WordPress, PrestaShop, Drupal, Custom PHP)
+ * @param {string} projectType - The type of project to create
+ * @param {object} deps - Dependencies status
+ * @param {object} versions - Dependency versions
+ * @param {ora.Ora} spinner - Ora spinner instance
+ * @param {boolean} hasCopilotCli - Whether Copilot CLI is available
+ */
+const handleCmsSetup = async (projectType, deps, versions, spinner, hasCopilotCli) => {
+  try {
+    // Get CMS-specific prompts
+    logger.section('Project Configuration');
+    
+    let cmsPrompts = [];
+    const basePrompts = [
+      {
+        type: 'input',
+        name: 'projectName',
+        message: 'Project name:',
+        default: 'my-project',
+        validate: (input) => {
+          if (!input.trim()) return 'Project name is required';
+          if (!/^[a-z0-9-_]+$/i.test(input)) return 'Use only alphanumeric, dash, or underscore';
+          return true;
+        }
+      },
+      {
+        type: 'input',
+        name: 'projectDescription',
+        message: 'Project description (optional):',
+        default: ''
+      }
+    ];
+    
+    // Add type-specific prompts
+    if (projectType === 'wordpress') {
+      cmsPrompts = [...basePrompts, ...getWordPressPrompts()];
+    } else if (projectType === 'prestashop') {
+      cmsPrompts = [...basePrompts, ...getPrestaShopPrompts()];
+    } else if (projectType === 'drupal') {
+      cmsPrompts = [...basePrompts, ...getDrupalPrompts()];
+    } else if (projectType === 'custom-php') {
+      cmsPrompts = [...basePrompts, ...getCustomPhpPrompts()];
+    }
+    
+    // Add common options
+    cmsPrompts.push(
+      {
+        type: 'input',
+        name: 'repoUrl',
+        message: 'Git repository URL (optional):',
+        default: ''
+      },
+      {
+        type: 'confirm',
+        name: 'wantCopilotSetup',
+        message: 'Add GitHub Copilot integration (.github folder)?',
+        default: true
+      }
+    );
+    
+    const config = await inquirer.prompt(cmsPrompts);
+    config.projectType = projectType;
+    
+    // Validate project directory doesn't exist
+    const projectPath = path.join(process.cwd(), config.projectName);
+    
+    if (directoryExists(projectPath)) {
+      logger.error(`Directory "${config.projectName}" already exists. Please choose a different name.`);
+      process.exit(1);
+    }
+    
+    // Start project creation
+    logger.title('Creating Project');
+    
+    // Create project directory
+    spinner = ora();
+    spinner.text = 'Creating project directory...';
+    spinner.start();
+    
+    await fs.ensureDir(projectPath);
+    spinner.succeed(`Created project directory: ${config.projectName}`);
+    
+    // Create CMS project based on type
+    if (projectType === 'wordpress') {
+      logger.section('WordPress Setup');
+      await createWordPressProject(projectPath, config, spinner, deps);
+    } else if (projectType === 'prestashop') {
+      logger.section('PrestaShop Setup');
+      await createPrestaShopProject(projectPath, config, spinner, deps);
+    } else if (projectType === 'drupal') {
+      logger.section('Drupal Setup');
+      await createDrupalProject(projectPath, config, spinner, deps);
+    } else if (projectType === 'custom-php') {
+      logger.section('PHP Project Setup');
+      await createCustomPhpProject(projectPath, config, spinner, deps);
+    }
+    
+    // Setup Git if repo URL provided
+    if (config.repoUrl) {
+      logger.section('Git Configuration');
+      spinner = ora();
+      spinner.text = 'Initializing git...';
+      spinner.start();
+      
+      runCommand('git init', { cwd: projectPath, silent: true });
+      runCommand(`git remote add origin ${config.repoUrl}`, { cwd: projectPath, silent: true });
+      spinner.succeed('Git initialized with remote');
+    } else {
+      spinner = ora();
+      spinner.text = 'Initializing git...';
+      spinner.start();
+      runCommand('git init', { cwd: projectPath, silent: true });
+      spinner.succeed('Git initialized');
+    }
+    
+    // Setup Copilot integration if requested
+    if (config.wantCopilotSetup) {
+      logger.section('GitHub Copilot Integration');
+      await setupCopilotIntegration(projectPath, config, spinner, hasCopilotCli);
+    }
+    
+    // Create README.md
+    logger.section('Documentation');
+    spinner = ora();
+    spinner.text = 'Creating README.md...';
+    spinner.start();
+    
+    const readmeContent = generateCmsReadme(config);
+    await fs.writeFile(path.join(projectPath, 'README.md'), readmeContent);
+    spinner.succeed('README.md created');
+    
+    // Create .gitignore
+    spinner = ora();
+    spinner.text = 'Creating .gitignore...';
+    spinner.start();
+    
+    const gitignoreContent = getCmsGitignore(projectType);
+    await fs.writeFile(path.join(projectPath, '.gitignore'), gitignoreContent);
+    spinner.succeed('.gitignore created');
+    
+    // Success message
+    logger.title('Setup Complete! 🎉');
+    
+    console.log(chalk.green('  Your project has been created successfully!'));
+    console.log();
+    console.log(chalk.white('  Project: ') + chalk.cyan(config.projectName));
+    console.log(chalk.white('  Type: ') + chalk.cyan(getProjectTypeLabel(projectType)));
+    console.log();
+    
+    console.log(chalk.white('  Next steps:'));
+    console.log(chalk.cyan(`  1. cd ${config.projectName}`));
+    
+    if (projectType === 'wordpress') {
+      if (!deps.wpCli && !deps.composer) {
+        console.log(chalk.cyan('  2. Download WordPress from wordpress.org'));
+      }
+      console.log(chalk.cyan('  3. Configure wp-config.php'));
+      console.log(chalk.cyan('  4. Run installation wizard'));
+    } else if (projectType === 'prestashop') {
+      console.log(chalk.cyan('  2. Configure database settings'));
+      console.log(chalk.cyan('  3. Run installation wizard'));
+    } else if (projectType === 'drupal') {
+      console.log(chalk.cyan('  2. drush site:install (or use web installer)'));
+    } else if (projectType === 'custom-php') {
+      console.log(chalk.cyan('  2. Start your development server'));
+    }
+    
+    console.log();
+    
+    if (config.wantCopilotSetup) {
+      console.log(chalk.white('  GitHub Copilot:'));
+      console.log(chalk.cyan('  Instructions: .github/copilot-instructions.md'));
+      if (hasCopilotCli) {
+        console.log(chalk.green('  ✔ Project prompt generated with Copilot CLI'));
+      }
+      console.log();
+    }
+    
+    logger.success('Happy coding! 🚀');
+    logger.newLine();
+    
+  } catch (error) {
+    spinner.fail('Setup failed');
+    logger.error(error.message);
+    logger.newLine();
+    logger.info('If you need help, run: vdigitalize doctor');
+    process.exit(1);
+  }
+};
+
+/**
+ * Get human-readable label for project type
+ */
+const getProjectTypeLabel = (type) => {
+  const labels = {
+    'fullstack': 'Full-Stack (Laravel + React)',
+    'wordpress': 'WordPress',
+    'prestashop': 'PrestaShop',
+    'drupal': 'Drupal',
+    'custom-php': 'Custom PHP'
+  };
+  return labels[type] || type;
+};
+
+/**
+ * Generate README for CMS projects
+ */
+const generateCmsReadme = (config) => {
+  return `# ${config.projectName}
+
+${config.projectDescription || ''}
+
+## Project Type
+
+${getProjectTypeLabel(config.projectType)}
+
+## Setup Instructions
+
+${config.projectType === 'wordpress' ? `
+### WordPress Setup
+
+1. Configure your database settings
+2. Update wp-config.php with your credentials
+3. Run the WordPress installation wizard
+4. Activate your theme/plugins
+
+#### Theme Development
+Your custom theme is located in \`wp-content/themes/\`
+
+#### Plugin Development
+Your custom plugins are in \`wp-content/plugins/\`
+` : ''}
+
+${config.projectType === 'prestashop' ? `
+### PrestaShop Setup
+
+1. Configure database connection
+2. Run the PrestaShop installer
+3. Activate your theme/modules from back office
+
+#### Theme Development
+Custom themes: \`themes/\`
+
+#### Module Development
+Custom modules: \`modules/\`
+` : ''}
+
+${config.projectType === 'drupal' ? `
+### Drupal Setup
+
+1. Configure database in sites/default/settings.php
+2. Run: \`drush site:install\` or use web installer
+3. Enable your custom modules/themes
+
+#### Theme Development
+Custom themes: \`web/themes/custom/\`
+
+#### Module Development
+Custom modules: \`web/modules/custom/\`
+` : ''}
+
+${config.projectType === 'custom-php' ? `
+### PHP Project
+
+1. Install dependencies: \`composer install\`
+2. Configure your environment
+3. Run development server
+
+#### Project Structure
+- \`public/\` - Web root
+- \`src/\` - Application code
+- \`config/\` - Configuration files
+` : ''}
+
+## GitHub Copilot
+
+${config.wantCopilotSetup ? `
+This project includes GitHub Copilot integration:
+- \`.github/copilot-instructions.md\` - AI context and guidelines
+- \`.github/prompts/\` - Saved prompts for reference
+` : 'No Copilot integration configured.'}
+
+---
+
+Generated with vdigitalize CLI
+`;
+};
+
+/**
+ * Get .gitignore content for CMS projects
+ */
+const getCmsGitignore = (projectType) => {
+  const common = `# Dependencies
+node_modules/
+vendor/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.local.php
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+error_log
+debug.log
+
+# Cache
+cache/
+tmp/
+`;
+
+  const wpIgnore = `
+# WordPress specific
+wp-config.php
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/cache/
+wp-content/backup-db/
+wp-content/backups/
+wp-content/blogs.dir/
+wp-content/advanced-cache.php
+wp-content/wp-cache-config.php
+wp-content/debug.log
+
+# Ignore all plugins/themes except custom
+# wp-content/plugins/*
+# !wp-content/plugins/your-custom-plugin/
+# wp-content/themes/*
+# !wp-content/themes/your-custom-theme/
+`;
+
+  const psIgnore = `
+# PrestaShop specific
+config/settings.inc.php
+config/defines.inc.php
+cache/*
+var/*
+upload/
+download/
+img/p/
+img/c/
+img/m/
+img/tmp/
+themes/*/cache/
+`;
+
+  const drupalIgnore = `
+# Drupal specific
+web/sites/*/settings.local.php
+web/sites/*/files/
+web/sites/*/private/
+web/sites/simpletest/
+web/sites/*/translations/
+`;
+
+  const phpIgnore = `
+# Build outputs
+dist/
+build/
+`;
+
+  if (projectType === 'wordpress') return common + wpIgnore;
+  if (projectType === 'prestashop') return common + psIgnore;
+  if (projectType === 'drupal') return common + drupalIgnore;
+  return common + phpIgnore;
+};
+
+/**
  * Main setup command handler
  */
 export const setup = async () => {
@@ -1177,7 +2785,21 @@ export const setup = async () => {
       logger.info('GitHub CLI not detected');
     }
     
-    // Step 1: Collect basic project info
+    // Show CMS-specific tools
+    if (deps.wpCli) logger.success(`WP-CLI ${versions.wpCli} detected`);
+    if (deps.drush) logger.success(`Drush ${versions.drush} detected`);
+    if (deps.mysql) logger.success(`MySQL ${versions.mysql} detected`);
+    
+    // Step 0: Select project type
+    logger.section('Project Type');
+    const { projectType } = await inquirer.prompt(getProjectTypePrompts());
+    
+    // Handle CMS-specific setups
+    if (projectType !== 'fullstack') {
+      return await handleCmsSetup(projectType, deps, versions, spinner, hasCopilotCli);
+    }
+    
+    // Step 1: Collect basic project info (for fullstack only)
     logger.section('Project Configuration');
     const basicAnswers = await inquirer.prompt(getSetupPrompts());
     

@@ -85,6 +85,42 @@ const dependencies = [
     },
     optional: true,
     requiresGh: true
+  },
+  {
+    name: 'WP-CLI',
+    command: 'wp --version',
+    installUrl: 'https://wp-cli.org/',
+    installCommand: {
+      darwin: 'brew install wp-cli',
+      linux: 'curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp',
+      win32: 'Download from https://wp-cli.org/'
+    },
+    optional: true,
+    category: 'cms'
+  },
+  {
+    name: 'Drush',
+    command: 'drush --version',
+    installUrl: 'https://www.drush.org/',
+    installCommand: {
+      darwin: 'composer global require drush/drush',
+      linux: 'composer global require drush/drush',
+      win32: 'composer global require drush/drush'
+    },
+    optional: true,
+    category: 'cms'
+  },
+  {
+    name: 'MySQL',
+    command: 'mysql --version',
+    installUrl: 'https://dev.mysql.com/downloads/',
+    installCommand: {
+      darwin: 'brew install mysql',
+      linux: 'sudo apt install mysql-server',
+      win32: 'Download from https://dev.mysql.com/downloads/'
+    },
+    optional: true,
+    category: 'database'
   }
 ];
 
@@ -192,8 +228,9 @@ export const doctor = async () => {
   logger.section('Optional Dependencies');
   console.log();
 
+  // First show general optional deps (non-CMS)
   for (const result of results) {
-    if (!result.optional) continue;
+    if (!result.optional || result.category) continue;
     
     if (result.installed) {
       console.log(
@@ -214,8 +251,33 @@ export const doctor = async () => {
         chalk.yellow('  ○'),
         chalk.white(result.name.padEnd(12)),
         chalk.gray('│'),
-        chalk.yellow('Not installed (optional)')
+        chalk.yellow('Not installed')
       );
+    }
+  }
+
+  // Show CMS-specific tools
+  const cmsTools = results.filter(r => r.optional && (r.category === 'cms' || r.category === 'database'));
+  if (cmsTools.length > 0) {
+    console.log();
+    console.log(chalk.gray('  CMS Development Tools:'));
+    
+    for (const result of cmsTools) {
+      if (result.installed) {
+        console.log(
+          chalk.green('  ✔'),
+          chalk.white(result.name.padEnd(12)),
+          chalk.gray('│'),
+          chalk.cyan(result.version)
+        );
+      } else {
+        console.log(
+          chalk.gray('  ○'),
+          chalk.gray(result.name.padEnd(12)),
+          chalk.gray('│'),
+          chalk.gray('Not installed')
+        );
+      }
     }
   }
 
