@@ -1,6 +1,6 @@
 {
   "name": "@vdigitalize-cli/vdigitalize",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "A professional CLI tool for setting up full-stack projects with Laravel backend, React frontend, CMS (WordPress, PrestaShop, Drupal), and GitHub Copilot integration",
   "type": "module",
   "main": "index.js",
