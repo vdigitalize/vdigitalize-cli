@@ -173,6 +173,12 @@ const checkDependencies = () => {
       versions.drush = output.match(/(\d+\.\d+(\.\d+)?)/)?.[1] || 'unknown';
     } catch { versions.drush = 'unknown'; }
   }
+  if (deps.mysql) {
+    try {
+      const output = execSync('mysql --version', { encoding: 'utf8', stdio: 'pipe' });
+      versions.mysql = output.match(/(\d+\.\d+(\.\d+)?)/)?.[1] || 'unknown';
+    } catch { versions.mysql = 'unknown'; }
+  }
   
   return { deps, versions };
 };
@@ -2801,7 +2807,7 @@ export const setup = async () => {
     
     // Step 1: Collect basic project info (for fullstack only)
     logger.section('Project Configuration');
-    const basicAnswers = await inquirer.prompt(getSetupPrompts());
+    const basicAnswers = await inquirer.prompt(getFullStackPrompts());
     
     // Step 2: Get project features for Copilot context
     logger.section('Project Features');
