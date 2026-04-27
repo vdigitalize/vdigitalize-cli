@@ -229,6 +229,20 @@ const getProjectTypePrompts = () => [
 const getFullStackPrompts = () => [
   {
     type: 'input',
+    name: 'projectName',
+    message: 'What is your project name?',
+    validate: validateFolderName,
+    transformer: (input) => chalk.cyan(input)
+  },
+  {
+    type: 'input',
+    name: 'projectDescription',
+    message: 'Project description:',
+    default: 'A full-stack web application',
+    validate: (input) => input.length > 0 || 'Description is required'
+  },
+  {
+    type: 'input',
     name: 'frontendFolder',
     message: 'Frontend folder name:',
     default: 'frontend',
@@ -258,6 +272,12 @@ const getFullStackPrompts = () => [
     name: 'distRepoUrl',
     message: 'Frontend/dist Git repository URL:',
     validate: validateGitUrl
+  },
+  {
+    type: 'confirm',
+    name: 'hasStagingProd',
+    message: 'Do you have staging and production environments?',
+    default: false
   }
 ];
 
@@ -2205,11 +2225,10 @@ const generateFallbackPrompt = (config) => {
  * @returns {string} - Copilot instructions content
  */
 const generateCopilotInstructions = (config) => {
-  const featuresList = config.features?.map(f => `- ${f}`).join('\n') || '- Standard web application features';
+  const projectType = config.projectType || 'fullstack';
   
-  return `# Copilot Instructions for ${config.projectName}
-
-## ⚠️ CRITICAL: Prompt Logging Requirement
+  // Base prompt logging instructions (shared by all project types)
+  const promptLogging = `## ⚠️ CRITICAL: Prompt Logging Requirement
 
 **IMPORTANT:** Every significant prompt from the user MUST be saved to \`.github/prompts/\` folder.
 
@@ -2233,38 +2252,20 @@ Save a prompt when the user:
    - Summary of implementation
    - Key decisions made
 
-### Example Prompt File
+---`;
 
-\`\`\`markdown
-# Feature: User Profile Page
+  // Full-stack specific content
+  if (projectType === 'fullstack') {
+    const featuresList = config.features?.map(f => `- ${f}`).join('\n') || '- Standard web application features';
+    
+    return `# Copilot Instructions for ${config.projectName}
 
-**Date:** 2024-01-15
-**Type:** Feature Implementation
-
-## Original Prompt
-
-"Create a user profile page with avatar upload, bio editing, and social links"
-
-## Implementation Summary
-
-- Created ProfilePage component with form handling
-- Added avatar upload with image cropping
-- Implemented bio with markdown support
-- Added social links management
-
-## Decisions Made
-
-- Used React Hook Form for form state
-- Cloudinary for image storage
-- Limited bio to 500 characters
-\`\`\`
-
----
+${promptLogging}
 
 ## Project Overview
 
 **Name:** ${config.projectName}
-**Description:** ${config.projectDescription}
+**Description:** ${config.projectDescription || 'A full-stack web application'}
 **Type:** ${config.appType || 'Web Application'}
 
 ## Tech Stack
@@ -2336,6 +2337,200 @@ ${config.hasStagingProd ? `
 ---
 
 **Remember:** Save every significant prompt to \`.github/prompts/\` for tracking, learning, and training purposes!
+`;
+  }
+
+  // WordPress specific content
+  if (projectType === 'wordpress') {
+    return `# Copilot Instructions for ${config.projectName}
+
+${promptLogging}
+
+## Project Overview
+
+**Name:** ${config.projectName}
+**Description:** ${config.projectDescription || 'A WordPress project'}
+**Type:** WordPress ${config.wpSetupType === 'theme' ? 'Theme' : config.wpSetupType === 'plugin' ? 'Plugin' : 'Website'}
+
+## Tech Stack
+
+- **CMS:** WordPress
+- **Language:** PHP
+- **Database:** MySQL
+${config.themeName ? `- **Theme:** ${config.themeName}` : ''}
+
+## Code Style Guidelines
+
+### WordPress/PHP
+- Follow WordPress Coding Standards
+- Use proper escaping and sanitization
+- Follow the WordPress Plugin/Theme guidelines
+- Use hooks and filters appropriately
+- Document with PHPDoc comments
+- Prefix function names and classes
+
+### Theme Development
+- Use template hierarchy correctly
+- Keep templates clean and semantic
+- Use \`get_template_part()\` for reusable sections
+- Properly enqueue scripts and styles
+
+### Plugin Development
+- Use OOP where appropriate
+- Implement activation/deactivation hooks
+- Use WordPress nonces for security
+- Follow the single responsibility principle
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking!
+`;
+  }
+
+  // PrestaShop specific content
+  if (projectType === 'prestashop') {
+    return `# Copilot Instructions for ${config.projectName}
+
+${promptLogging}
+
+## Project Overview
+
+**Name:** ${config.projectName}
+**Description:** ${config.projectDescription || 'A PrestaShop project'}
+**Type:** PrestaShop ${config.psSetupType === 'theme' ? 'Theme' : config.psSetupType === 'module' ? 'Module' : 'Store'}
+
+## Tech Stack
+
+- **CMS:** PrestaShop ${config.psVersion || '8.x'}
+- **Language:** PHP
+- **Template Engine:** Smarty
+- **Database:** MySQL
+
+## Code Style Guidelines
+
+### PrestaShop/PHP
+- Follow PrestaShop coding standards
+- Use proper sanitization and validation
+- Implement hooks correctly
+- Use Smarty templates for views
+- Follow MVC architecture
+
+### Module Development
+- Register hooks in install method
+- Use ObjectModel for database interactions
+- Implement configuration pages properly
+- Follow module structure conventions
+
+### Theme Development
+- Use proper theme.yml configuration
+- Override templates correctly
+- Use parent theme assets when possible
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking!
+`;
+  }
+
+  // Drupal specific content
+  if (projectType === 'drupal') {
+    return `# Copilot Instructions for ${config.projectName}
+
+${promptLogging}
+
+## Project Overview
+
+**Name:** ${config.projectName}
+**Description:** ${config.projectDescription || 'A Drupal project'}
+**Type:** Drupal ${config.drupalSetupType === 'theme' ? 'Theme' : config.drupalSetupType === 'module' ? 'Module' : 'Site'}
+
+## Tech Stack
+
+- **CMS:** Drupal 10/11
+- **Language:** PHP
+- **Template Engine:** Twig
+- **Database:** MySQL/PostgreSQL
+
+## Code Style Guidelines
+
+### Drupal/PHP
+- Follow Drupal coding standards
+- Use dependency injection
+- Implement services properly
+- Use Entity API for data
+- Follow PSR-4 autoloading
+
+### Module Development
+- Use proper routing with YAML
+- Implement controllers and forms
+- Create custom entities when needed
+- Use event subscribers for hooks
+
+### Theme Development
+- Use proper .info.yml configuration
+- Override Twig templates correctly
+- Use libraries for CSS/JS
+- Implement preprocess functions
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking!
+`;
+  }
+
+  // Custom PHP specific content
+  if (projectType === 'custom-php') {
+    return `# Copilot Instructions for ${config.projectName}
+
+${promptLogging}
+
+## Project Overview
+
+**Name:** ${config.projectName}
+**Description:** ${config.projectDescription || 'A PHP project'}
+**Type:** Custom PHP ${config.phpFramework === 'plain' ? '(Plain PHP)' : `(${config.phpFramework})`}
+
+## Tech Stack
+
+- **Language:** PHP 8.1+
+${config.phpFramework && config.phpFramework !== 'plain' ? `- **Framework:** ${config.phpFramework}` : ''}
+${config.useComposer ? '- **Dependencies:** Composer' : ''}
+${config.includeFrontend ? '- **Frontend:** Vite' : ''}
+
+## Code Style Guidelines
+
+### PHP
+- Follow PSR-12 coding standards
+- Use type declarations
+- Implement proper error handling
+- Use namespaces and autoloading
+- Document with PHPDoc
+
+### Project Structure
+- Keep public/ as web root
+- Separate concerns (MVC or similar)
+- Use environment variables for config
+- Implement proper security measures
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking!
+`;
+  }
+
+  // Default fallback
+  return `# Copilot Instructions for ${config.projectName}
+
+${promptLogging}
+
+## Project Overview
+
+**Name:** ${config.projectName}
+**Description:** ${config.projectDescription || 'A web project'}
+
+---
+
+**Remember:** Save every significant prompt to \`.github/prompts/\` for tracking!
 `;
 };
 
@@ -2834,7 +3029,7 @@ export const setup = async () => {
     }
     
     // Combine all answers
-    const config = { ...basicAnswers, ...featureAnswers, ...envAnswers, ...finalAnswers };
+    const config = { ...basicAnswers, ...featureAnswers, ...envAnswers, ...finalAnswers, projectType: 'fullstack' };
     
     // Validate project directory doesn't exist
     const projectPath = path.join(process.cwd(), config.projectName);
